@@ -28,6 +28,19 @@
 _har_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)
 _har_bin="$_har_root/automatic-rename.sh"
 
+# Re-sourcing ~/.bashrc re-runs whatever appended to an array PROMPT_COMMAND
+# before this hook, and those entries now land after our wrap, where they would
+# spend its armed preexec. Move the wrap back to the end; the latch below skips
+# everything else. (Only when the wrap is there: the framework path owns none.)
+if [[ -n ${_har_installed:-} && $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
+  _har_pc=() _har_had=""
+  for _har_e in "${PROMPT_COMMAND[@]}"; do
+    if [[ $_har_e == _har_precmd_wrap ]]; then _har_had=1; else _har_pc+=("$_har_e"); fi
+  done
+  [[ -n $_har_had ]] && PROMPT_COMMAND=("${_har_pc[@]}" _har_precmd_wrap)
+  unset _har_pc _har_had _har_e
+fi
+
 # The _har_installed latch makes re-sourcing (e.g. `source ~/.bashrc`) a no-op,
 # so PROMPT_COMMAND never grows a second entry and we never double-register.
 if [[ -n ${HERDR_PANE_ID:-} && -x $_har_bin && -z ${_har_installed:-} ]]; then

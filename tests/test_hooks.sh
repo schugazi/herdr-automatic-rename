@@ -40,6 +40,14 @@ got=$(HERDR_PANE_ID=x HAL_HOOK="$REPO/shell/hook.bash" /usr/bin/env bash -c \
   'source "$HAL_HOOK"; source "$HAL_HOOK"; printf "%s\n" "$PROMPT_COMMAND" | grep -c _har_precmd_wrap')
 check "bash: double-source adds PROMPT_COMMAND once" "1" "$got"
 
+# bash 5.1+ array PROMPT_COMMAND: the wrap is its own LAST element, and stays
+# last when a re-sourced rc file appends its entries again ahead of the hook.
+# shellcheck disable=SC2016
+got=$(HERDR_PANE_ID=x HAL_HOOK="$REPO/shell/hook.bash" /usr/bin/env bash -c \
+  'PROMPT_COMMAND=(a); source "$HAL_HOOK"; PROMPT_COMMAND+=(b); source "$HAL_HOOK"
+   printf "%s," "${PROMPT_COMMAND[@]}"')
+check "bash: array PROMPT_COMMAND keeps the wrap last across re-sourcing" "a,b,_har_precmd_wrap," "$got"
+
 # Trap behavior only makes sense in an interactive shell (the only place a hook
 # is sourced). Non-interactive `/usr/bin/env bash -c` has different DEBUG-trap scoping, so we
 # simulate a real .bashrc: set a DEBUG trap, source the hook after it, then run a

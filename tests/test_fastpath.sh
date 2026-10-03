@@ -214,4 +214,30 @@ check_contains "reconcile: the same tab is named after the title" "$(log)" \
   "tab rename t1 [1] Fix the revenue query"
 teardown
 
+# ======================================================================
+# Moved pane: HERDR_TAB_ID still names the tab the shell started in, but herdr
+#   reports the pane in t2 now. The rename must land on t2, never on t1.
+# ======================================================================
+setup
+printf '{"t2":{"auto":"zsh","enabled":true}}\n' >"$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+fixture pane_p1.json <<'JSON'
+{"result":{"pane":{"pane_id":"p1","tab_id":"t2"}}}
+JSON
+fixture tab_t2.json <<'JSON'
+{"result":{"tab":{"tab_id":"t2","label":"[1] zsh"}}}
+JSON
+/usr/bin/env bash "$ENGINE" preexec "nvim notes.md"
+check "moved pane: renames the tab it is in now" "tab rename t2 [1] nvim" "$(log)"
+teardown
+
+# Moved to another workspace: the pane id no longer resolves. Nothing is renamed,
+# least of all the tab the shell started in.
+setup
+fixture pane_p1.json <<'JSON'
+{}
+JSON
+/usr/bin/env bash "$ENGINE" preexec "nvim notes.md"
+check "unresolved pane: no rename" "" "$(log)"
+teardown
+
 t_summary

@@ -2588,14 +2588,32 @@ ar_fast_once() {
   # A cd has landed by the time the prompt is drawn, and preexec's $PWD is the
   # one the last precmd already saw, so the workspace half is precmd's alone.
   AR_FAST_WS=""
+  ar_fast_where || return 0
   [ "$MODE" = "precmd" ] && ar_fast_workspace
   [ "$NAME_TABS" = "1" ] && ar_fast_tab
   return 0
 }
 
+# ar_fast_where - AR_FAST_TAB = the tab this shell's pane is in NOW. HERDR_TAB_ID
+# is fixed when the shell starts and herdr does not update it when the pane moves
+# to another tab, so a moved pane renamed its old tab (or, that tab gone, nothing).
+# So ask herdr where the pane is. A pane id that no longer resolves (a move to
+# another workspace gives the pane a new id) renames nothing rather than guess;
+# the reconcile names the tab at the next herdr event. With no pane id at all,
+# the variable is all there is.
+ar_fast_where() {
+  AR_FAST_TAB="${HERDR_TAB_ID:-}"
+  [ -n "${HERDR_PANE_ID:-}" ] || return 0
+  AR_FAST_TAB=$("$HERDR" pane get "$HERDR_PANE_ID" 2>/dev/null \
+    | jq -r '(.result.pane // .pane).tab_id // empty' 2>/dev/null)
+  [ -n "$AR_FAST_TAB" ] && return 0
+  ar_trace "fast: pane [$HERDR_PANE_ID] did not resolve to a tab, nothing renamed"
+  return 1
+}
+
 # The tab half: rename the tab this shell is in, and nothing else.
 ar_fast_tab() {
-  local tab="${HERDR_TAB_ID:-}"
+  local tab="${AR_FAST_TAB:-}"
   ar_trace "fast tab entered: $MODE, tab [${tab}]"
   [ -n "$tab" ] || { ar_trace "fast tab: no HERDR_TAB_ID"; return 0; }
   local prog="" cmd="" info name label raw prefix slabel enabled auto want ws
@@ -2690,7 +2708,7 @@ ar_fast_tab() {
 # adopting one takes its label, and fetching that on every prompt is the cost
 # this guard exists to refuse. The reconcile adopts it at the next herdr event.
 ar_fast_workspace() {
-  local tab="${HERDR_TAB_ID:-}" wid base shown json label owner active slabel prefix want
+  local tab="${AR_FAST_TAB:-}" wid base shown json label owner active slabel prefix want
   local enabled auto unused seeded
   ar_trace "fast workspace entered: tab [${tab}]"
   ar_ws_pass || { ar_trace "fast workspace: workspace pass is off"; return 0; }

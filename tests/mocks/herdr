@@ -97,6 +97,8 @@ case "$group" in
   pane)
     case "$action" in
       list) serve panes.json '{"result":{"panes":[]}}' ;;
+      # The pane where the shell left it, unless pane_<id>.json says it moved.
+      get) serve "pane_$1.json" "{\"result\":{\"pane\":{\"pane_id\":\"$1\",\"tab_id\":\"${HERDR_TAB_ID:-}\"}}}" ;;
       process-info)
         p=""
         while [ $# -gt 0 ]; do case "$1" in --pane) p="$2"; shift 2 ;; *) shift ;; esac; done
