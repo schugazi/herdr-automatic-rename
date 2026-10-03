@@ -95,7 +95,14 @@ if [[ -n ${HERDR_PANE_ID:-} && -x $_har_bin && -z ${_har_installed:-} ]]; then
       _har_precmd
       return $_har_st
     }
-    PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}_har_precmd_wrap"
+    # bash 5.1+ runs every element of an array PROMPT_COMMAND, and a scalar assignment only
+    # extends element 0: the elements after it would run after the wrap and spend the armed
+    # preexec on themselves. Append a new element there instead.
+    if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
+      PROMPT_COMMAND+=(_har_precmd_wrap)
+    else
+      PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}_har_precmd_wrap"
+    fi
 
     # Own the DEBUG trap only when nothing else holds it. Installed LAST: nothing
     # in this hook runs at top level afterward, so the trap has no trailing setup
