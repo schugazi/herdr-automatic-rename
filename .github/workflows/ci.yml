@@ -45,7 +45,7 @@ jobs:
       # suffix, so a glob misses it.
       - name: Syntax check
         run: |
-          for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh shell/hook.bash \
+          for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh ai.sh config.example.sh install.sh shell/hook.bash \
                    tests/run.sh tests/lib.sh tests/test_*.sh tests/mocks/herdr; do
             /bin/bash -n "$f"
           done
@@ -103,5 +103,5 @@ jobs:
 
       - name: Lint shell sources
         run: |
-          shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh \
+          shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh ai.sh config.example.sh install.sh \
             shell/hook.bash tests/*.sh tests/mocks/herdr

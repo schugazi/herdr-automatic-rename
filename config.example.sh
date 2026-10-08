@@ -167,6 +167,17 @@
 # when it would start like a tab number ("[12]").
 # TITLE_CONDENSE=0
 
+# 1 has a model write each agent title's label instead, within the same budget
+# (MAX_TITLE_LEN, less any icon or name prefix) and without repeating the
+# workspace's name. Runs `claude -p` in the background, one call per distinct
+# title, cached under the state dir; the condensed (or plain) title shows until
+# the answer lands. A failed call is retried after an hour. A session keeps
+# the first label it gets; the `retitle` action (bind it to a key) asks again
+# from the session's latest prompts and pins that answer instead.
+# AI_TITLES=0
+# AI_TITLE_MODEL=haiku
+# AI_CLAUDE=claude
+
 # Verbs dropped when a title starts with one. Only the first word is checked, so
 # "the auth rewrite needs review" keeps "review". The match is by spelling, so
 # "Plan needs approval" becomes "needs-approval". Two titles can collapse to the

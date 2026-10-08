@@ -156,6 +156,14 @@ title = "Reset tab to automatic naming"
 contexts = ["global"]
 command = ["bash", "automatic-rename.sh", "reset"]
 
+# With AI_TITLES=1 an agent tab keeps the label it got first. This asks the
+# model again from the session's latest prompts and pins the new label.
+[[actions]]
+id = "retitle"
+title = "Herdr Automatic Rename: retitle this agent tab with AI"
+contexts = ["global"]
+command = ["bash", "automatic-rename.sh", "retitle"]
+
 # Print why the current tab has the name it has: versions, the tab's state
 # record, its label, and the decisions one real pass made about it. Invoke with
 #   herdr plugin action invoke herdr-automatic-rename.doctor

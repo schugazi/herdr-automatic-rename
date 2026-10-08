@@ -46,6 +46,9 @@ _AR_SESSION_ID='^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$'
 # megabytes, and this can run once per untitled agent tab per event.
 _AR_TRANSCRIPT_TAIL=262144
 _AR_TRANSCRIPT_HEAD=65536
+# The latest prompts sit among tool output that runs to megabytes, and are read
+# only when a retitle is asked for, so that read takes a wider window.
+_AR_TRANSCRIPT_RECENT=4194304
 
 # What a transcript line says about the session, for the read that wants the
 # opening prompt. The read that wants the title needs none of it.
@@ -153,4 +156,26 @@ ar_transcript_topic() {
   [ -n "$row" ] || return 1
   IFS=$AR_ROW_SEP read -r AR_TRANSCRIPT_TOPIC AR_TRANSCRIPT_TOPIC_LC <<< "$row"
   [ -n "$AR_TRANSCRIPT_TOPIC" ]
+}
+
+# ar_transcript_recent <pane agent> <session id> <pane directory> -> the last
+# three prompts the user typed, oldest first, each cut to 200 characters and
+# joined by " | "; empty when there is no transcript to read. What the AI
+# retitle (ai.sh) names a session after, where its title only says how it began.
+#
+# Stricter than `typed`, because the LAST prompts are read rather than the
+# first: a skill's expansion lands right after the command that ran it, marked
+# isMeta (or, in an older shape, as blocks next to a human origin), and an
+# origin of any other kind -- a peer agent, a coordinator -- is not the user.
+ar_transcript_recent() {
+  [ "${AGENT_TRANSCRIPT:-1}" = "1" ] && [ "$1" = "$AR_TRANSCRIPT_AGENT" ] || return 0
+  ar_transcript_file "$2" "$3" || return 0
+  tail -c "$_AR_TRANSCRIPT_RECENT" "$AR_TRANSCRIPT_FILE" 2>/dev/null \
+    | jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_TRANSCRIPT"'
+      def said: .type == "user" and (.isMeta != true)
+        and (if .origin then .origin.kind == "human"
+             else (.message.content | type) == "string" end);
+      [ inputs | fromjson? // empty | select(said)
+        | content | select(test("^Base directory for this skill") | not) | opening | task("") | select(length > 0) | .[:200] ]
+      | .[-3:] | join(" | ")' 2>/dev/null
 }

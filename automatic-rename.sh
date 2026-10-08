@@ -1250,6 +1250,9 @@ ar_tab_name() {
   # agent-heavy session spends fewer herdr round-trips than it did before (the
   # local work is a wash: one jq over the pane row instead of one over the
   # process-info reply).
+  # A pin keyed by the tab names the agent that ran there; once none does, the
+  # next agent in this tab gets a label of its own (ai.sh).
+  [ "${AI_TITLES:-0}" = "1" ] && [ -z "$AR_PANE_AGENT" ] && ar_ai_unpin_tab "$1"
   if [ "${AGENT_TITLES:-1}" = "1" ] && [ -n "$AR_PANE_AGENT" ]; then
     title=$(ar_title_clean "$AR_PANE_TITLE" "$AR_PANE_TITLE_LC" "$AR_PANE_DIR_LC" "$AR_PANE_AGENT")
     [ -n "$title" ] || ar_trace "$1 title refused or absent: [$AR_PANE_TITLE]"
@@ -1264,6 +1267,12 @@ ar_tab_name() {
       title=$(ar_title_clean "$AR_TRANSCRIPT_TOPIC" "$AR_TRANSCRIPT_TOPIC_LC" \
         "$AR_PANE_DIR_LC" "$AR_PANE_AGENT")
       [ -n "$title" ] && ar_trace "$1 transcript topic used: [$title]"
+    fi
+    # A pinned label holds while the title says nothing (blank, or just the
+    # agent's name): the pin is what the tab is called for this session.
+    if [ -z "$title" ] && [ "${AI_TITLES:-0}" = "1" ] && ar_ai_pinned "$1"; then
+      title=$AR_AI_TITLE
+      ar_trace "$1 pinned ai title kept: [$title]"
     fi
     if [ -n "$title" ]; then
       ar_trace "$1 title accepted: [$title]"
@@ -1286,7 +1295,7 @@ ar_tab_name() {
       # -- the one thing condensing exists to prevent. A program with no glyph
       # reserves nothing, rather than shortening the label to make room for
       # something that never arrives. ar_icon is a lookup, no subshell.
-      if [ "${TITLE_CONDENSE:-0}" = "1" ]; then
+      if [ "${TITLE_CONDENSE:-0}" = "1" ] || [ "${AI_TITLES:-0}" = "1" ]; then
         local reserve="" style=${ICON_STYLE:-name_and_icon}
         if [ "${ICONS_ENABLED:-0}" = "1" ] && [ "$style" != "name" ]; then
           reserve=$(ar_icon "$AR_PANE_AGENT")
@@ -1313,8 +1322,16 @@ ar_tab_name() {
         # ar_title_name_prefix is the same answer ar_format will act on, asked
         # once rather than derived twice.
         reserve="$reserve$(ar_title_name_prefix "$AR_PANE_AGENT" "${MAX_TITLE_LEN:-28}")"
-        condensed=$(ar_condense_title "$title" "$reserve")
-        [ -n "$condensed" ] && title=$condensed
+        # A model's label wins where there is one (ai.sh): the session's pinned
+        # first label, within the same budget, less the same reserve, that
+        # condensing gets.
+        if [ "${AI_TITLES:-0}" = "1" ] && ar_ai_label "$1" "$title" "$reserve" "${5:-}"; then
+          ar_trace "$1 ai title used: [$AR_AI_TITLE]"
+          title=$AR_AI_TITLE
+        elif [ "${TITLE_CONDENSE:-0}" = "1" ]; then
+          condensed=$(ar_condense_title "$title" "$reserve")
+          [ -n "$condensed" ] && title=$condensed
+        fi
       fi
       ar_branch_of "$AR_PANE_DIR" >/dev/null
       ar_label "$AR_PANE_DIR" "${5:-}" "$AR_BRANCH" "$AR_PANE_AGENT" "" "$title"
@@ -2350,6 +2367,22 @@ ar_notify() {
   "$HERDR" notification show "$1" --body "$2" >/dev/null 2>&1 || true
 }
 
+# ar_action_tab -> the tab an action targets. Prefers the documented action
+# inputs (HERDR_TAB_ID, then the context JSON) and falls back to the focused
+# tab, so an action still targets something.
+ar_action_tab() {
+  local tab="${HERDR_TAB_ID:-}"
+  if [ -z "$tab" ] && [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
+    tab=$(printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" \
+      | jq -r '.tab.tab_id // .tab.id // .tab_id // empty' 2>/dev/null)
+  fi
+  if [ -z "$tab" ]; then
+    tab=$("$HERDR" tab list 2>/dev/null \
+      | jq -r 'first((.result.tabs // .tabs)[] | select(.focused) | .tab_id) // empty' 2>/dev/null)
+  fi
+  printf '%s' "$tab"
+}
+
 # ar_trace <words...> - one line to $AR_TRACE_FILE when AR_TRACE is set, else
 # nothing. Every failure this plugin has looks the same from outside (nothing
 # happens), and the herdr calls all end in >/dev/null, so this is the one record
@@ -2875,6 +2908,8 @@ ar_main() {
   . "$AR_ROOT/git.sh"
   # shellcheck source=transcript.sh
   . "$AR_ROOT/transcript.sh"
+  # shellcheck source=ai.sh
+  . "$AR_ROOT/ai.sh"
 
   # TITLE_BRANDS as one argument for the two title lifts, joined here so neither
   # pays for it per pane. Both look a brand up by the pane's agent kind, and the
@@ -2896,6 +2931,10 @@ ar_main() {
   case "$MODE" in --clear|clear) CLEAR=1 ;; esac
 
   case "$MODE" in
+    ai-worker)
+      ar_ai_worker
+      exit 0
+      ;;
     preexec)
       [ "$NAME_TABS" = "1" ] || exit 0
       AR_FAST_ARG="${2:-}"                    # the command line being run
@@ -2922,18 +2961,29 @@ ar_main() {
       [ -n "${2:-}" ] && SHELL_NAME="$2"
       ar_run fast
       ;;
+    retitle)
+      # Leave a mark for the reconcile: ar_ai_label consumes it while naming the
+      # tab and queues a model call from the session's latest prompts. A mark
+      # still there after the pass was never consumed, because that tab is not
+      # an agent tab with a title, or is not named automatically.
+      tab=$(ar_action_tab)
+      if [ "${AI_TITLES:-0}" != "1" ] || ! ar_ai_ready; then
+        ar_notify "Nothing to retitle" "AI tab titles are off (AI_TITLES=0, or a needed tool is missing)."
+        exit 0
+      fi
+      [ -n "$tab" ] || { ar_notify "Nothing to retitle" "No tab to retitle."; exit 0; }
+      mark="$AR_AI_MARKS/$(ar_ai_id "$tab")"
+      mkdir -p "$AR_AI_MARKS" && : >"$mark" || exit 0
+      if ! ar_run full action; then
+        rm -f "$mark"
+        ar_notify "Retitle is waiting" "Another naming pass held the lock. Try again."
+      elif [ -f "$mark" ]; then
+        rm -f "$mark"
+        ar_notify "Nothing to retitle" "That tab is not an automatically named agent tab."
+      fi
+      ;;
     reset)
-      # Prefer the documented action inputs (HERDR_TAB_ID, then the context JSON);
-      # fall back to the focused tab so reset still targets something.
-      tab="${HERDR_TAB_ID:-}"
-      if [ -z "$tab" ] && [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
-        tab=$(printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" \
-          | jq -r '.tab.tab_id // .tab.id // .tab_id // empty' 2>/dev/null)
-      fi
-      if [ -z "$tab" ]; then
-        tab=$("$HERDR" tab list 2>/dev/null \
-          | jq -r 'first((.result.tabs // .tabs)[] | select(.focused) | .tab_id) // empty' 2>/dev/null)
-      fi
+      tab=$(ar_action_tab)
       [ -n "$tab" ] && [ "$NAME_TABS" = "1" ] && AR_FORCE_TAB="$tab"
       if ! ar_run full action; then
         ar_notify "Reset is waiting" "Another naming pass held the lock. Try again."
@@ -2957,19 +3007,11 @@ ar_main() {
       fi
       ;;
     doctor)
-      # Same three-step tab resolution as reset. Then one REAL pass, traced into
+      # Same tab resolution as reset. Then one REAL pass, traced into
       # a file of its own so a user's AR_TRACE_FILE is not written to, and the
       # report reads that file. The pass runs whether or not a tab resolved,
       # because "nothing is named at all" is the other question doctor answers.
-      tab="${HERDR_TAB_ID:-}"
-      if [ -z "$tab" ] && [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
-        tab=$(printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" \
-          | jq -r '.tab.tab_id // .tab.id // .tab_id // empty' 2>/dev/null)
-      fi
-      if [ -z "$tab" ]; then
-        tab=$("$HERDR" tab list 2>/dev/null \
-          | jq -r 'first((.result.tabs // .tabs)[] | select(.focused) | .tab_id) // empty' 2>/dev/null)
-      fi
+      tab=$(ar_action_tab)
       AR_TRACE=1
       AR_TRACE_FILE=$(mktemp "$STATE_DIR/.doctor.XXXXXX") || exit 0
       # No pass, no report: reading the old state and label as if a pass had just

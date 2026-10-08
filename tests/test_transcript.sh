@@ -153,5 +153,25 @@ JSON
 check "another agent's pane is not read" "-" "$(topic_of "$ID" "$DIR" codex)"
 check "and the kind is compared exactly" "-" "$(topic_of "$ID" "$DIR" Claude)"
 
+# ---- the latest prompts, for an AI retitle ----
+cat >"$FILE" <<'JSON'
+{"type":"user","message":{"role":"user","content":"one"},"origin":{"kind":"human"}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}
+{"type":"user","message":{"role":"user","content":"two"},"origin":{"kind":"human"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}
+{"type":"user","message":{"role":"user","content":"three"},"origin":{"kind":"human"}}
+{"type":"user","message":{"role":"user","content":"four"},"origin":{"kind":"human"}}
+JSON
+check "the last three typed prompts, oldest first" "two | three | four" "$(ar_transcript_recent claude "$ID" "$DIR")"
+cat >>"$FILE" <<'JSON'
+{"type":"user","message":{"role":"user","content":"<command-message>code-review</command-message>\n<command-name>/code-review</command-name>\n<command-args>auth.sh</command-args>"},"origin":{"kind":"human"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /home/u/.claude/skills/code-review"}]},"origin":{"kind":"human"}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x"}]}}
+{"type":"user","message":{"role":"user","content":"[Subagent hand-back] report"},"origin":{"kind":"peer"}}
+JSON
+check "skill expansions and other agents are not the user" "three | four | code-review auth.sh" \
+  "$(ar_transcript_recent claude "$ID" "$DIR")"
+check "only for claude" "" "$(ar_transcript_recent codex "$ID" "$DIR")"
+
 rm -rf "$SB"
 t_summary

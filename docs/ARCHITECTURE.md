@@ -11,6 +11,7 @@ naming.sh             pure naming rules, strings in and strings out
 icons.sh              icon settings and glyph map
 git.sh                branch lookup from .git files
 transcript.sh         task title from a Claude Code transcript
+ai.sh                 opt-in model-written labels, pinned per session, asked in the background
 shell/hook.*          zsh, bash, and fish hooks for live renames
 config.example.sh     every setting with its default
 install.sh            installs the plugin and wires the hook
@@ -86,7 +87,7 @@ There is no server. The plugin runs as short-lived bash processes.
 
 ## 7. Security considerations
 
-- No network and no credentials. The plugin only talks to the local herdr socket.
+- No network and no credentials. The plugin only talks to the local herdr socket, except that `AI_TITLES=1` sends agent task titles to a model through `claude -p`.
 - The transcript reader sees what the user typed to their agent. It reads only that pane's session and can be turned off.
 - Session ids must look like UUIDs before they become part of a path.
 - Control characters are removed from herdr strings before they reach the shell.
