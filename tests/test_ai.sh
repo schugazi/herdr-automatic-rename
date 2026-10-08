@@ -42,9 +42,12 @@ check "and goes in a header" "x-api-key: test-key" "$(cat "$SB/headers")"
 : >"$SB/calls"
 check "no key, no answer" "" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE=/nonexistent ask)"
 check "and no call" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
-printf 'file-key\n' >"$SB/key"
+printf 'OTHER_KEY=x\nANTHROPIC_API_KEY="file-key"\n' >"$SB/key"
 check "the key file stands in for the variable" "auth-retry" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/key" ask)"
-check "with its key" "x-api-key: file-key" "$(cat "$SB/headers")"
+check "with its ANTHROPIC_API_KEY line" "x-api-key: file-key" "$(cat "$SB/headers")"
+printf 'bare-key\n' >"$SB/bare"
+ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/bare" ask >/dev/null
+check "a bare key file is the key" "x-api-key: bare-key" "$(cat "$SB/headers")"
 AI_API_KEY_FILE="$SB/key" ask >/dev/null
 check "the variable wins over the file" "x-api-key: test-key" "$(cat "$SB/headers")"
 stub $'`auth-retry`\nauth'

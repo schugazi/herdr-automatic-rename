@@ -17,8 +17,9 @@
 : "${AI_TITLES:=0}"            # 1 = ask a model for agent tab labels
 : "${AI_TITLE_MODEL:=claude-haiku-5-5}"  # any Anthropic API model id
 : "${AI_API_URL:=https://api.anthropic.com/v1/messages}"
-# The API key: $ANTHROPIC_API_KEY when set, else this file.
-: "${AI_API_KEY_FILE:=${XDG_CONFIG_HOME:-$HOME/.config}/herdr-automatic-rename/anthropic-api-key}"
+# The API key: $ANTHROPIC_API_KEY when set, else this file's ANTHROPIC_API_KEY=
+# line (read, never sourced), or the whole file when it is a bare key.
+: "${AI_API_KEY_FILE:=${XDG_CONFIG_HOME:-$HOME/.config}/anthropic/secrets.env}"
 
 # Answers to a title are shared by every herdr session; the queue and worker
 # with them. Pins and retitle marks are not: every session numbers its tabs from
@@ -194,8 +195,11 @@ ar_ai_label() {
 # shorter than the last, and the first one that fits is taken.
 ar_ai_ask() {
   local msg=$1 max=$2 ws=$3 model=$4 sep=$5 out line avoid="" key=${ANTHROPIC_API_KEY:-}
-  [ -n "$key" ] || { [ -s "$AI_API_KEY_FILE" ] && key=$(<"$AI_API_KEY_FILE"); }
-  key=${key//[[:space:]]/}
+  if [ -z "$key" ] && [ -s "$AI_API_KEY_FILE" ]; then
+    key=$(<"$AI_API_KEY_FILE")
+    [[ $key =~ (^|$'\n')ANTHROPIC_API_KEY=([^$'\n']*) ]] && key=${BASH_REMATCH[2]}
+  fi
+  key=${key//[\"\'[:space:]]/}
   [ -n "$key" ] || return 0
   [ -n "$ws" ] && avoid=" The tab already sits under a workspace named \"$ws\", so never spend characters on that name."
   # The key goes in through a header file, so it never shows in `ps`.
