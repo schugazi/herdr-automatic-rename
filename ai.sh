@@ -188,6 +188,31 @@ ar_ai_label() {
   return 0
 }
 
+# ar_ai_file_key <file> -> the file's ANTHROPIC_API_KEY entry, read the way
+# personal-feed reads the same file (optional `export`, surrounding whitespace
+# and quotes; comment lines skipped; never sourced), or the file's one line when
+# that is a bare key. Nothing otherwise, so another secret in a shared file is
+# never sent as this one.
+ar_ai_file_key() {
+  local l k v bare="" n=0
+  [ -s "$1" ] || return 0
+  while IFS= read -r l || [ -n "$l" ]; do
+    l=${l#"${l%%[![:space:]]*}"}; l=${l%"${l##*[![:space:]]}"}
+    [ -n "$l" ] || continue
+    n=$((n + 1)) bare=$l
+    [[ $l == \#* || $l != *=* ]] && continue
+    [[ $l == "export "* ]] && { l=${l#export }; l=${l#"${l%%[![:space:]]*}"}; }
+    k=${l%%=*} v=${l#*=}
+    [ "${k%"${k##*[![:space:]]}"}" = ANTHROPIC_API_KEY ] || continue
+    v=${v#"${v%%[![:space:]]*}"}
+    [[ ${#v} -ge 2 && ${v:0:1} == "${v: -1}" && ${v:0:1} == [\"\'] ]] && v=${v:1:${#v}-2}
+    printf '%s' "$v"
+    return 0
+  done <"$1"
+  [[ $n == 1 && $bare != *[=#[:space:]]* ]] && printf '%s' "$bare"
+  return 0
+}
+
 # ar_ai_ask <message> <budget> <workspace label> <model> <separator> -> the
 # model's label, or "" when the call failed or no answer keeps a label's rules.
 #
@@ -195,12 +220,10 @@ ar_ai_label() {
 # shorter than the last, and the first one that fits is taken.
 ar_ai_ask() {
   local msg=$1 max=$2 ws=$3 model=$4 sep=$5 out line avoid="" key=${ANTHROPIC_API_KEY:-}
-  if [ -z "$key" ] && [ -s "$AI_API_KEY_FILE" ]; then
-    key=$(<"$AI_API_KEY_FILE")
-    [[ $key =~ (^|$'\n')ANTHROPIC_API_KEY=([^$'\n']*) ]] && key=${BASH_REMATCH[2]}
-  fi
-  key=${key//[\"\'[:space:]]/}
-  [ -n "$key" ] || return 0
+  [ -n "$key" ] || key=$(ar_ai_file_key "$AI_API_KEY_FILE")
+  # A key never holds whitespace: one that does is a mangled entry (an inline
+  # comment, a stray word), and is not sent.
+  [[ -n $key && $key != *[[:space:]]* ]] || return 0
   [ -n "$ws" ] && avoid=" The tab already sits under a workspace named \"$ws\", so never spend characters on that name."
   # The key goes in through a header file, so it never shows in `ps`.
   out=$(jq -n --arg m "$model" --arg u "$msg" \

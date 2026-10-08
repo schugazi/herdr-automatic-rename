@@ -50,6 +50,23 @@ ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/bare" ask >/dev/null
 check "a bare key file is the key" "x-api-key: bare-key" "$(cat "$SB/headers")"
 AI_API_KEY_FILE="$SB/key" ask >/dev/null
 check "the variable wins over the file" "x-api-key: test-key" "$(cat "$SB/headers")"
+printf 'OTHER_KEY=other-secret\nSECOND_KEY=second\n' >"$SB/other"
+: >"$SB/calls"
+check "a file without the entry answers nothing" "" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/other" ask)"
+check "and sends no other secret" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
+fkey() { printf "$1" >"$SB/f"; ar_ai_file_key "$SB/f"; }
+check "export and indentation are read past" "k1" "$(fkey '  export ANTHROPIC_API_KEY = "k1"\n')"
+check "single quotes come off" "k2" "$(fkey "ANTHROPIC_API_KEY='k2'\n")"
+check "CRLF line endings are read past" "k3" "$(fkey '# note\r\nANTHROPIC_API_KEY=k3\r\n')"
+check "the first entry wins" "k4" "$(fkey 'ANTHROPIC_API_KEY=k4\nANTHROPIC_API_KEY=k5\n')"
+check "an empty entry is no key" "" "$(fkey 'ANTHROPIC_API_KEY=\n')"
+check "a commented-out entry is no key" "" "$(fkey '# ANTHROPIC_API_KEY=k6\n')"
+check "a lookalike name is no key" "" "$(fkey 'MY_ANTHROPIC_API_KEY=k7\n')"
+check "two bare lines are no key" "" "$(fkey 'k8\nk9\n')"
+printf 'ANTHROPIC_API_KEY=k1 # comment\n' >"$SB/f"
+: >"$SB/calls"
+ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/f" ask >/dev/null
+check "a key with whitespace in it is not sent" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
 stub $'`auth-retry`\nauth'
 check "quotes come off, first fitting line wins" "auth-retry" "$(ask)"
 stub $'auth-retry-backoff-fix\n[2] auth\nauth-backoff\nauth'
