@@ -15,8 +15,10 @@
 # shellcheck disable=SC2034
 
 : "${AI_TITLES:=0}"            # 1 = ask a model for agent tab labels
-: "${AI_TITLE_MODEL:=haiku}"   # any --model value claude accepts
-: "${AI_CLAUDE:=claude}"       # the claude binary the worker runs
+: "${AI_TITLE_MODEL:=claude-haiku-5-5}"  # any Anthropic API model id
+: "${AI_API_URL:=https://api.anthropic.com/v1/messages}"
+# The API key: $ANTHROPIC_API_KEY when set, else this file.
+: "${AI_API_KEY_FILE:=${XDG_CONFIG_HOME:-$HOME/.config}/herdr-automatic-rename/anthropic-api-key}"
 
 # Answers to a title are shared by every herdr session; the queue and worker
 # with them. Pins and retitle marks are not: every session numbers its tabs from
@@ -33,7 +35,7 @@ ar_ai_ready() {
   if [ -z "${_ar_ai_ready:-}" ]; then
     local c
     _ar_ai_ready=1
-    for c in md5sum setsid flock timeout; do
+    for c in md5sum setsid flock curl; do
       command -v "$c" >/dev/null 2>&1 || { _ar_ai_ready=0; break; }
     done
   fi
@@ -191,12 +193,18 @@ ar_ai_label() {
 # A model counts characters badly, so it is asked for several candidates, each
 # shorter than the last, and the first one that fits is taken.
 ar_ai_ask() {
-  local msg=$1 max=$2 ws=$3 model=$4 sep=$5 out line avoid=""
+  local msg=$1 max=$2 ws=$3 model=$4 sep=$5 out line avoid="" key=${ANTHROPIC_API_KEY:-}
+  [ -n "$key" ] || { [ -s "$AI_API_KEY_FILE" ] && key=$(<"$AI_API_KEY_FILE"); }
+  key=${key//[[:space:]]/}
+  [ -n "$key" ] || return 0
   [ -n "$ws" ] && avoid=" The tab already sits under a workspace named \"$ws\", so never spend characters on that name."
-  out=$(timeout 60 "$AI_CLAUDE" -p --model "$model" --setting-sources '' \
-    --no-session-persistence --tools '' --strict-mcp-config \
-    --system-prompt "You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most $max characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"$sep\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written.$avoid Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation." \
-    "$msg" 2>/dev/null) || return 0
+  # The key goes in through a header file, so it never shows in `ps`.
+  out=$(jq -n --arg m "$model" --arg u "$msg" \
+    --arg s "You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most $max characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"$sep\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written.$avoid Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation." \
+    '{model: $m, max_tokens: 1024, output_config: {effort: "low"}, system: $s, messages: [{role: "user", content: $u}]}' |
+    curl -sf --max-time 60 "$AI_API_URL" -H @<(printf 'x-api-key: %s\n' "$key") \
+      -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' --data-binary @- 2>/dev/null |
+    jq -r '.content[]? | select(.type == "text") | .text' 2>/dev/null) || return 0
   while IFS= read -r line; do
     line=$(printf '%s' "$line" | tr -d '`"'"'" | tr -s '[:space:]' ' ')
     line=${line# }; line=${line% }

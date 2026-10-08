@@ -169,14 +169,17 @@
 
 # 1 has a model write each agent title's label instead, within the same budget
 # (MAX_TITLE_LEN, less any icon or name prefix) and without repeating the
-# workspace's name. Runs `claude -p` in the background, one call per distinct
-# title, cached under the state dir; the condensed (or plain) title shows until
-# the answer lands. A failed call is retried after an hour. A session keeps
-# the first label it gets; the `retitle` action (bind it to a key) asks again
-# from the session's latest prompts and pins that answer instead.
+# workspace's name. Calls the Anthropic Messages API with curl in the
+# background, one call per distinct title, cached under the state dir; the
+# condensed (or plain) title shows until the answer lands. A failed call is
+# retried after an hour. A session keeps the first label it gets; the `retitle`
+# action (bind it to a key) asks again from the session's latest prompts and
+# pins that answer instead. The API key is $ANTHROPIC_API_KEY, or else the
+# contents of AI_API_KEY_FILE (keep it chmod 600).
 # AI_TITLES=0
-# AI_TITLE_MODEL=haiku
-# AI_CLAUDE=claude
+# AI_TITLE_MODEL=claude-haiku-5-5
+# AI_API_KEY_FILE=~/.config/herdr-automatic-rename/anthropic-api-key
+# AI_API_URL=https://api.anthropic.com/v1/messages
 
 # Verbs dropped when a title starts with one. Only the first word is checked, so
 # "the auth rewrite needs review" keeps "review". The match is by spelling, so

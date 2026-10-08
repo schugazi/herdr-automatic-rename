@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit tests for ai.sh -- model-written tab labels, with a stub standing in for
-# claude so the rules a label has to keep are checked without a model.
+# curl so the rules a label has to keep are checked without a model.
 
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=tests/lib.sh
@@ -11,7 +11,9 @@ SHELL_NAME=zsh
 SB=$(mktemp -d "${TMPDIR:-/tmp}/hal-ai.XXXXXX")
 export XDG_STATE_HOME="$SB/state"
 AI_TITLES=1
-AI_CLAUDE="$SB/claude"
+CURL_STUB="$SB/bin/curl"
+mkdir -p "$SB/bin"; PATH="$SB/bin:$PATH"
+export ANTHROPIC_API_KEY=test-key
 # shellcheck source=ai.sh
 . "$here/../ai.sh"
 
@@ -22,13 +24,29 @@ if ! ar_ai_ready; then
   rm -rf "$SB"; t_summary; exit
 fi
 
-# The stub answers with its arguments' --model value unless told otherwise, and
-# logs every call.
-stub() { printf '#!/usr/bin/env bash\necho call >>%q\nprintf "%%s" %q\n' "$SB/calls" "$1" >"$AI_CLAUDE"; chmod +x "$AI_CLAUDE"; }
+# The curl stub logs every call, its arguments and the headers it was handed as
+# files, and answers in a Messages API response that opens with a thinking
+# block, as Haiku 5.5's does by default. reply <jq filter on the request>
+# answers whatever the filter makes of it.
+reply() { printf '#!/usr/bin/env bash\necho call >>%q\nprintf "%%s\\n" "$@" >%q\n: >%q\nfor a; do [[ $a == @/dev/fd/* ]] && cat "${a#@}" >>%q; done\njq -c %q\n' \
+  "$SB/calls" "$SB/args" "$SB/headers" "$SB/headers" \
+  "{content: [{type: \"thinking\", thinking: \"\", signature: \"s\"}, {type: \"text\", text: ($1)}]}" \
+  >"$CURL_STUB"; chmod +x "$CURL_STUB"; }
+stub() { reply "$(jq -rn --arg t "$1" '$t | tojson')"; }
 ask() { ar_ai_ask "Fix auth retry" 16 "" haiku -; }
 
 stub "auth-retry"
-check "a fitting answer is kept" "auth-retry" "$(ask)"
+check "a fitting answer after a thinking block is kept" "auth-retry" "$(ask)"
+check "the key stays out of curl's arguments" "no" "$(grep -q test-key "$SB/args" && echo yes || echo no)"
+check "and goes in a header" "x-api-key: test-key" "$(cat "$SB/headers")"
+: >"$SB/calls"
+check "no key, no answer" "" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE=/nonexistent ask)"
+check "and no call" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
+printf 'file-key\n' >"$SB/key"
+check "the key file stands in for the variable" "auth-retry" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/key" ask)"
+check "with its key" "x-api-key: file-key" "$(cat "$SB/headers")"
+AI_API_KEY_FILE="$SB/key" ask >/dev/null
+check "the variable wins over the file" "x-api-key: test-key" "$(cat "$SB/headers")"
 stub $'`auth-retry`\nauth'
 check "quotes come off, first fitting line wins" "auth-retry" "$(ask)"
 stub $'auth-retry-backoff-fix\n[2] auth\nauth-backoff\nauth'
@@ -37,7 +55,7 @@ stub "much-too-long-a-label"
 check "an answer over budget is refused" "" "$(ask)"
 stub "[3] auth"
 check "the jump-number shape is refused" "" "$(ask)"
-printf '#!/bin/sh\nexit 1\n' >"$AI_CLAUDE"
+printf '#!/bin/sh\nexit 1\n' >"$CURL_STUB"
 check "a failed call answers nothing" "" "$(ask)"
 
 # A miss queues the title; the background worker has nothing to run here.
@@ -45,7 +63,7 @@ AR_ROOT="$SB/none"
 ar_ai_title "Fix auth retry" "" api; check_rc "a miss is rc 1" 1 "$?"
 check "and queues the title" "1" "$(find "$AR_AI_DIR/queue" -type f | wc -l | tr -d ' ')"
 q=$(find "$AR_AI_DIR/queue" -type f)
-check "the request records model and separator" "haiku-" "$(head -2 "$q" | tr -d '\n')"
+check "the request records model and separator" "claude-haiku-5-5-" "$(head -2 "$q" | tr -d '\n')"
 printf 'auth-retry' >"$AR_AI_DIR/${q##*/}"
 rm -f "$q"
 ar_ai_title "Fix auth retry" "" api
@@ -65,7 +83,7 @@ mkdir -p "$SB/root"
 printf '#!/usr/bin/env bash\necho "$1" >>%q\n' "$SB/reconciled" >"$SB/root/automatic-rename.sh"
 AR_ROOT="$SB/root"
 rm -rf "$AR_AI_DIR"; mkdir -p "$AR_AI_DIR/queue"
-printf '#!/usr/bin/env bash\necho call >>%q\nprintf "%%s" "$3"\n' "$SB/calls" >"$AI_CLAUDE"
+reply '.model'
 : >"$SB/calls"
 printf 'm-old\n-\n16\napi\nFix auth retry\n' >"$AR_AI_DIR/queue/k1"
 printf '\n\n\n\n\n' >"$AR_AI_DIR/queue/k2"
@@ -121,7 +139,7 @@ AR_ROOT="$SB/root"
 stub "now-task"; ar_ai_worker
 check "the answer replaces the pin" "now-task" "$(cat "$AR_AI_PINS/s1")"
 cp "$SB/pinreq" "$req"
-printf '#!/bin/sh\nexit 1\n' >"$AI_CLAUDE"; ar_ai_worker
+printf '#!/bin/sh\nexit 1\n' >"$CURL_STUB"; ar_ai_worker
 check "a failed retitle keeps the pin" "now-task" "$(cat "$AR_AI_PINS/s1")"
 # The agent left the tab while the call was out: its pin is gone, and stays so.
 cp "$SB/pinreq" "$req"; rm -f "$AR_AI_PINS/s1"
@@ -140,8 +158,8 @@ rm -f "$AR_AI_DIR"/queue/*
 AR_PANE_SESSION=s1
 
 # A separator of one space survives the queue. The stub answers "space" when
-# the system prompt (its 11th argument) asks for words joined by one.
-printf '#!/usr/bin/env bash\n[[ ${11} == *%q* ]] && printf space || printf other\n' 'joined by " "' >"$AI_CLAUDE"
+# the system prompt asks for words joined by one.
+reply 'if (.system | contains("joined by \" \"")) then "space" else "other" end'
 printf 'm\n \n16\n\nT\n' >"$AR_AI_DIR/queue/sp"
 ar_ai_worker
 check "a space separator reaches the model" "space" "$(cat "$AR_AI_DIR/sp")"

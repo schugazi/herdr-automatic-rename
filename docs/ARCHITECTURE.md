@@ -87,7 +87,7 @@ There is no server. The plugin runs as short-lived bash processes.
 
 ## 7. Security considerations
 
-- No network and no credentials. The plugin only talks to the local herdr socket, except that `AI_TITLES=1` sends agent task titles to a model through `claude -p`.
+- No network and no credentials. The plugin only talks to the local herdr socket, except that `AI_TITLES=1` sends agent task titles to the Anthropic Messages API with curl, using the key in `$ANTHROPIC_API_KEY` or `AI_API_KEY_FILE`.
 - The transcript reader sees what the user typed to their agent. It reads only that pane's session and can be turned off.
 - Session ids must look like UUIDs before they become part of a path.
 - Control characters are removed from herdr strings before they reach the shell.
