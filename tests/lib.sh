@@ -8,6 +8,23 @@
 _t_n=0
 _t_fail=0
 
+# Sandboxes go under $TMPDIR, and the engine names a directory after the first
+# `.git` up its chain (ar_project_base) without stopping at a sandbox's edge: a
+# stray `.git` above the temp dir -- an empty /tmp/.git is enough -- names every
+# fixture after the directory holding it. So pick the first temp dir with no
+# `.git` anywhere above it, "/" included.
+_t_no_git_above() { # <dir>
+  local d=${1%/}
+  while :; do
+    [ -e "$d/.git" ] && return 1
+    [ -n "$d" ] || return 0
+    d=${d%/*}
+  done
+}
+for _t_tmp in "${TMPDIR:-/tmp}" /tmp /var/tmp; do
+  if _t_no_git_above "$_t_tmp"; then export TMPDIR=$_t_tmp; break; fi
+done
+
 # check <name> <expected> <actual> -- string equality.
 check() {
   _t_n=$(( _t_n + 1 ))
