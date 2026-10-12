@@ -2396,4 +2396,51 @@ check_absent   "and prints no report"           "$out" "record:"
 
 teardown
 
+# ======================================================================
+# Scenario 53: a focused pane labelled in PASSIVE_PANE_LABELS never names its
+#   tab. t1: the passive ttt pane is focused, so the tab is named from its other
+#   pane. t2: a pane with any other label still names its tab as usual.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+printf 'PASSIVE_PANE_LABELS=(cc-ttt-links)\n' >"$HERDR_AUTOMATIC_RENAME_CONFIG"
+fixture snapshot.json <<'JSON'
+{"result":{"snapshot":{
+  "workspaces":[{"workspace_id":"w1","label":"api"}],
+  "tabs":[
+    {"tab_id":"w1:t1","label":"1","pane_count":2,"focused":true,"workspace_id":"w1"},
+    {"tab_id":"w1:t2","label":"2","pane_count":2,"focused":false,"workspace_id":"w1"}
+  ],
+  "panes":[
+    {"pane_id":"p1","tab_id":"w1:t1","focused":false},
+    {"pane_id":"p2","tab_id":"w1:t1","focused":true,"label":"cc-ttt-links"},
+    {"pane_id":"p3","tab_id":"w1:t2","focused":false},
+    {"pane_id":"p4","tab_id":"w1:t2","focused":false,"label":"notes"}
+  ],
+  "layouts":[
+    {"tab_id":"w1:t1","focused_pane_id":"p2"},
+    {"tab_id":"w1:t2","focused_pane_id":"p4"}
+  ],
+  "agents":[]
+}}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"htop","cmdline":"htop"}]}}}
+JSON
+fixture procinfo_p2.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":200,
+  "foreground_processes":[{"pid":200,"argv0":"ttt","cmdline":"ttt a.ts"}]}}}
+JSON
+fixture procinfo_p4.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":400,
+  "foreground_processes":[{"pid":400,"argv0":"nvim","cmdline":"nvim notes.md"}]}}}
+JSON
+run_event pane.focused
+out=$(log)
+check_contains "a passive focused pane leaves the name to its tab's other pane" "$out" "tab rename w1:t1 htop"
+check_contains "any other label names its tab as usual"                         "$out" "tab rename w1:t2 nvim"
+check_absent   "the passive pane's program never names a tab"                   "$out" "ttt"
+teardown
+
 t_summary

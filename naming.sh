@@ -162,6 +162,10 @@ declare -p NAME_ONLY_PROGRAMS >/dev/null 2>&1 || NAME_ONLY_PROGRAMS=(nvim vim vi
 # keeps showing the shell (SHELL_NAME) so it does not flicker.
 declare -p IGNORED_PROGRAMS >/dev/null 2>&1 || IGNORED_PROGRAMS=(ls eza ll la cd z zoxide cat bat less more echo pwd clear which man head tail wc cp mv rm mkdir touch fzf sudo doas)
 
+# Pane labels (`herdr pane rename`) of side panes that never name their tab:
+# focusing one leaves the name to the tab's other panes, an agent first.
+declare -p PASSIVE_PANE_LABELS >/dev/null 2>&1 || PASSIVE_PANE_LABELS=()
+
 # Language runtimes and package runners that front for the program you actually
 # launched. An agent installed from npm is usually a bin shim pointing at a JS
 # entrypoint: the kernel execs the interpreter, so the foreground process is

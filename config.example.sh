@@ -221,6 +221,12 @@
 # the shell name so it does not flicker.
 # IGNORED_PROGRAMS=(ls eza ll la cd z zoxide cat bat less more echo pwd clear which man head tail wc cp mv rm mkdir touch fzf sudo doas)
 
+# Pane labels (set with `herdr pane rename`) of side panes that never name their
+# tab. While one is focused, the tab is named from its other panes, an agent
+# first, as if focus had stayed there. Needs a herdr whose API snapshot carries
+# layouts. Empty by default.
+# PASSIVE_PANE_LABELS=(cc-ttt-links)
+
 # Runtimes that launch an agent for you, such as `node` for an npm-installed
 # agent. When one of these is in the foreground of a pane where herdr detected
 # an agent, the tab takes the agent's name ("codex", not "node"). A plain `node

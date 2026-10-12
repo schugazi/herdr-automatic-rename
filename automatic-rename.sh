@@ -2513,6 +2513,9 @@ ar_reconcile() {
     # A tab split between an agent and a shell is about the agent, and it stays
     # about the agent while you read the shell half -- but an IDLE agent does not
     # outrank whatever you are actually looking at.
+    # A focused pane labelled in PASSIVE_PANE_LABELS stands aside first: the tab's
+    # focus counts as being on its other panes (an agent's, else the first), so a
+    # side pane opened beside an agent never renames the tab.
     #
     # A herdr with no layouts cannot answer rules 1 or 3, since both are the tab's
     # own focused pane, so such a tab is picked by rule 2 or not at all: an agent at
@@ -2520,13 +2523,19 @@ ar_reconcile() {
     # inference in ar_resolve_pane. Deliberate -- the rule needs no layout, and a
     # split with an agent working in it is the case the rule exists for.
     AR_SNAP_TABS_JSON=$(printf '%s' "$snap" | jq -c \
-      --arg brands "${AR_TITLE_BRANDS:-}" "$AR_JQ_CLEAN$AR_JQ_TASK"'
+      --arg brands "${AR_TITLE_BRANDS:-}" \
+      --argjson passive "$(jq -cn '$ARGS.positional' --args ${PASSIVE_PANE_LABELS[@]+"${PASSIVE_PANE_LABELS[@]}"})" \
+      "$AR_JQ_CLEAN$AR_JQ_TASK"'
       ($brands | brandmap) as $brand
        | (.result.snapshot // .snapshot) as $s
        | ($s.layouts // []) as $lay
        | ($s.panes // []) as $pan
        | {result:{tabs:[ $s.tabs[]? | .tab_id as $t
-           | (($lay | map(select(.tab_id == $t)) | .[0].focused_pane_id) // "") as $lp
+           | (($lay | map(select(.tab_id == $t)) | .[0].focused_pane_id) // "") as $lf
+           | ($pan | map(select(.tab_id == $t and (((.label // "") | IN($passive[])) | not)))) as $act
+           | (if ($pan | any(.pane_id == $lf and ((.label // "") | IN($passive[])))) and ($act | length) > 0
+              then ($act | map(select((.agent // "") != "")) + $act | .[0].pane_id)
+              else $lf end) as $lp
            | ($pan | map(select(.tab_id == $t and (.agent // "") != ""))) as $ag
            | ( ($ag | map(select(.pane_id == $lp)) | .[0].pane_id)
              # At work means not resting, so a status herdr adds later counts as
