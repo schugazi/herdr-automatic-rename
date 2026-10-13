@@ -6,11 +6,11 @@
 
 No more having to manually name your new tabs or deal with plain numbered tabs:
 
-`‎ 1 `‎‎‎‎ ‎ `‎ 2 ` ‎ ‎ ‎‎‎`‎ 3 `‎‎‎ ‎ ‎ +
+`‎ 1 `‎‎‎‎ ‎ `‎ 2 `‎ ‎‎ `‎ 3 `‎‎‎ ‎ ‎ +
 
 This plugin automatically names them either after their foreground process (inspired by [tmux](https://github.com/tmux/tmux)'s `automatic-rename`):
 
-`‎ [1] zsh `‎‎‎ ‎ `‎ [2] nvim  ` ‎ ‎ ‎‎‎`‎ [3] ssh `‎‎‎ ‎ ‎ +
+`‎ [1] zsh `‎‎‎ ‎ `‎ [2] nvim ` ‎  ‎‎`‎ [3] ssh `‎‎‎ ‎ ‎ +
 
 Or after the agent session context:
 
