@@ -156,8 +156,11 @@ check "and queues the latest prompts for the pin" "$AR_AI_PINS/s1" "$(sed -n 6p 
 check_contains "the request carries the prompts" "$(sed -n 5p "$req")" "p1 | p2"
 cp "$req" "$SB/pinreq"
 AR_ROOT="$SB/root"
+touch "$req"; touch "$SB/asked"   # not old: the worker expires pins past 30 days
 stub "now-task"; ar_ai_worker
 check "the answer replaces the pin" "now-task" "$(cat "$AR_AI_PINS/s1")"
+check "dated when it was asked, not answered" "no" "$([ "$AR_AI_PINS/s1" -nt "$SB/asked" ] && echo yes || echo no)"
+check "and leaves nothing in the queue" "" "$(ls -A "$AR_AI_DIR/queue")"
 cp "$SB/pinreq" "$req"
 printf '#!/bin/sh\nexit 1\n' >"$CURL_STUB"; ar_ai_worker
 check "a failed retitle keeps the pin" "now-task" "$(cat "$AR_AI_PINS/s1")"
@@ -165,6 +168,26 @@ check "a failed retitle keeps the pin" "now-task" "$(cat "$AR_AI_PINS/s1")"
 cp "$SB/pinreq" "$req"; rm -f "$AR_AI_PINS/s1"
 stub "late-answer"; ar_ai_worker
 check "a retitle for a dropped pin is dropped" "no" "$([ -e "$AR_AI_PINS/s1" ] && echo yes || echo no)"
+
+# AI_RETITLE_MINUTES: an old pin whose session has moved on retitles itself.
+rm -f "$AR_AI_DIR"/queue/*
+AR_ROOT="$SB/none"
+ar_ai_put "$AR_AI_PINS/s1" "now-task"
+touch -t 202001010000 "$SB/transcript"; touch -t 202001010100 "$AR_AI_PINS/s1"
+ar_transcript_file() { AR_TRANSCRIPT_FILE="$SB/transcript"; }
+due() { AI_RETITLE_MINUTES=$1 ar_ai_label w1:t1 "Some later title" "" api; find "$AR_AI_DIR/queue" -name 'pin-*' | wc -l | tr -d ' '; rm -f "$AR_AI_DIR"/queue/*; }
+check "off by default" "0" "$(due 0)"
+check "an old pin with an idle session is kept" "0" "$(due 30)"
+touch "$AR_AI_PINS/s1"; touch "$SB/transcript"
+check "a young pin is kept" "0" "$(due 30)"
+touch -t 202001010100 "$AR_AI_PINS/s1"
+check "an old pin with a session that moved on retitles" "1" "$(due 30)"
+check "and keeps the pin while it waits" "now-task" "$(cat "$AR_AI_PINS/s1")"
+touch "$SB/transcript"
+check "and is not asked again right away" "0" "$(due 30)"
+touch -t 202001010100 "$AR_AI_PINS/s1"
+check "only a Claude session is read" "0" "$(AR_PANE_AGENT=codex due 30)"
+unset -f ar_transcript_file
 
 # Two herdr sessions retitling the same tab id queue two requests, not one.
 rm -f "$AR_AI_DIR"/queue/*

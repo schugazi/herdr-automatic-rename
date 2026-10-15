@@ -72,6 +72,10 @@ def typed: .type == "user"
 # "code-review spec.md" says which review is running where the command alone does
 # not. Anything else has the blocks the tool wrapped around it taken off: the
 # expansion of a command, the caveat on a resumed session.
+# A built-in command that steers the session rather than saying what it is
+# about. /clear matters most: it is the first line of the session it starts, so
+# as an opening prompt it named every cleared tab "clear".
+def plumbing: test("<command-name>[[:space:]]*/?(clear|compact|resume|rewind|model|effort|fast|config|context|cost|status|help|exit)[[:space:]]*</command-name>");
 def opening:
   if test("<command-name>") then
     ((capture("<command-name>[[:space:]]*/?(?<n>[^<[:space:]]+)").n // "")
@@ -150,7 +154,7 @@ ar_transcript_topic() {
     row=$(head -c "$_AR_TRANSCRIPT_HEAD" "$AR_TRANSCRIPT_FILE" 2>/dev/null \
       | jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_TRANSCRIPT"'
         first(inputs | fromjson? // empty | select(typed)
-          | content | opening | task("") | select(length > 0))
+          | content | select(plumbing | not) | opening | task("") | select(length > 0))
         // empty | [ ., ascii_downcase ] | join([31] | implode)' 2>/dev/null)
   fi
   [ -n "$row" ] || return 1
@@ -176,6 +180,6 @@ ar_transcript_recent() {
         and (if .origin then .origin.kind == "human"
              else (.message.content | type) == "string" end);
       [ inputs | fromjson? // empty | select(said)
-        | content | select(test("^Base directory for this skill") | not) | opening | task("") | select(length > 0) | .[:200] ]
+        | content | select(test("^Base directory for this skill") or plumbing | not) | opening | task("") | select(length > 0) | .[:200] ]
       | .[-3:] | join(" | ")' 2>/dev/null
 }

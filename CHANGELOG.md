@@ -4,6 +4,14 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 ## [Unreleased]
 
+### Added
+
+- `AI_RETITLE_MINUTES` retitles an AI-pinned Claude tab on its own once the pin is that many minutes old and the session has moved on since. It rides the events that already rename tabs, so an idle tab is never asked about. `0`, the default, keeps every pin until the `retitle` action.
+
+### Fixed
+
+- A Claude tab no longer gets named after `/clear` (or another built-in session command such as `/compact` or `/model`) when the session has no title yet. `/clear` opens the new session's transcript, so every cleared tab was being named "clear" and, with `AI_TITLES=1`, pinned that way.
+
 ## [0.13.0] - 2026-09-29
 
 ### Changed
