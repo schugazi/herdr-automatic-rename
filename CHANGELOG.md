@@ -12,6 +12,21 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 - A Claude tab no longer gets named after `/clear` (or another built-in session command such as `/compact` or `/model`) when the session has no title yet. `/clear` opens the new session's transcript, so every cleared tab was being named "clear" and, with `AI_TITLES=1`, pinned that way.
 - An untitled Claude tab is named after its first prompt again when Claude Code writes hundreds of KB of request data ahead of it. The first 1 MiB of the transcript is now searched instead of 64 KiB, so such tabs no longer read "claude".
+- A local shell split beside a herdr-mirror pane, or moved into its tab, no longer renames that tab when a command starts. The shell hook used to check only the shell's own directory, so the label it wrote was pushed to the remote and opted the tab out there.
+
+## [0.14.0] - 2026-10-20
+
+### Added
+
+- `NAME_PANES` shows each agent's herdr name (`herdr agent start <name>`, `herdr agent rename`) on its pane border, on by default. Panes you named yourself and names that only repeat the agent kind are left alone, and `NAME_PANES=0` takes the names back off ([#29](https://github.com/qu8n/herdr-automatic-rename/issues/29), thanks @freivokh).
+
+## [0.13.1] - 2026-10-17
+
+### Fixed
+
+- Tabs mirrored by [herdr-mirror](https://github.com/nikok6/herdr-mirror) keep the label the remote machine gives them. The local plugin used to name, number and host-tag them, and herdr-mirror pushed that label to the remote, where it opted the tab out ([#26](https://github.com/qu8n/herdr-automatic-rename/issues/26), thanks @paidem).
+- The shell hook line now finds the plugin under herdr 0.9.5's `github-installations/` folder, and picks it over an old `github/` copy that `herdr plugin update` leaves behind. Before, a fresh install never loaded the hook, so tabs were not renamed when a command started. If you added the hook before this fix, re-run the installer to print the new line, then swap it in by hand ([#27](https://github.com/qu8n/herdr-automatic-rename/issues/27), thanks @paidem).
+- The bash hook no longer turns itself off when `cd` is an alias or function, or when `CDPATH` is set ([#28](https://github.com/qu8n/herdr-automatic-rename/issues/28), thanks @paidem). It used to lose track of its own folder and stop renaming tabs without any error.
 
 ## [0.13.0] - 2026-09-29
 
@@ -250,7 +265,9 @@ First public release.
 - Configuration via `~/.config/herdr-automatic-rename/config.sh` (or `$HERDR_AUTOMATIC_RENAME_CONFIG`), with a documented `config.example.sh`.
 - A self-contained test suite (bash and jq only).
 
-[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.13.1...v0.14.0
+[0.13.1]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.11.0...v0.11.1

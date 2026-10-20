@@ -507,4 +507,137 @@ check_contains "and its tabs still drop its directory" "$out" "tab rename w1:t1 
 check_contains "a subdirectory still says which" "$out" "tab rename w1:t2 web${SEP}nvim"
 teardown
 
+# ======================================================================
+# Scenario: herdr-mirror tabs belong to the remote (issue #26). A mirror pane
+#   runs herdr-mirror's streamer in its .mirror-pane marker directory, and
+#   herdr-mirror pushes any local label to the remote tab as a user rename. So
+#   no write reaches a mirror tab: not a name, not a number, not the host tag.
+#   t1 the remote's own host-tagged label, in the host tag's slot -> untouched
+#   t2 a fresh mirror tab, still on herdr's placeholder         -> untouched
+#   t3 an owned mirror tab, an agent reported onto its pane,
+#      numbered for another position                            -> untouched
+#   t4 a native tab after them                -> named, numbered for slot 4
+# ======================================================================
+setup
+export AUTO_INDEX=1 HOST_PREFIX=1
+TAG="$(uname -n 2>/dev/null)"; TAG="${TAG%%.*}: "
+mkdir -p "$XDG_STATE_HOME/herdr-automatic-rename"
+printf '{"w1:t3":{"auto":"claude","enabled":true}}\n' \
+  >"$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+fixture snapshot.json <<'JSON'
+{"result":{"snapshot":{
+  "workspaces":[{"workspace_id":"w1","label":"[1] api"}],
+  "tabs":[
+    {"tab_id":"w1:t1","label":"vps: [1] Build API","pane_count":1,"focused":true,"workspace_id":"w1"},
+    {"tab_id":"w1:t2","label":"2","pane_count":1,"focused":false,"workspace_id":"w1"},
+    {"tab_id":"w1:t3","label":"[5] claude","pane_count":1,"focused":false,"workspace_id":"w1"},
+    {"tab_id":"w1:t4","label":"4","pane_count":1,"focused":false,"workspace_id":"w1"}
+  ],
+  "panes":[
+    {"pane_id":"p1","tab_id":"w1:t1","focused":true,
+     "cwd":"/home/u/.local/state/herdr-mirror/.mirror-pane"},
+    {"pane_id":"p2","tab_id":"w1:t2","focused":true,
+     "foreground_cwd":"/home/u/.local/state/herdr-mirror/.mirror-pane"},
+    {"pane_id":"p3","tab_id":"w1:t3","focused":true,"agent":"claude",
+     "terminal_title_stripped":"Fix the login bug",
+     "cwd":"/home/u/.local/state/herdr-mirror/.mirror-pane"},
+    {"pane_id":"p4","tab_id":"w1:t4","focused":true,"cwd":"/home/u/dev/web"}
+  ],
+  "layouts":[
+    {"tab_id":"w1:t1","focused_pane_id":"p1"},
+    {"tab_id":"w1:t2","focused_pane_id":"p2"},
+    {"tab_id":"w1:t3","focused_pane_id":"p3"},
+    {"tab_id":"w1:t4","focused_pane_id":"p4"}
+  ]
+}}}
+JSON
+for p in p1 p2 p3; do
+  fixture "procinfo_$p.json" <<JSON
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"/home/u/.local/bin/herdr-mirror",
+    "cmdline":"/home/u/.local/bin/herdr-mirror pane w1:$p"}]}}}
+JSON
+done
+fixture procinfo_p4.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":400,
+  "foreground_processes":[{"pid":400,"argv0":"nvim","cmdline":"nvim main.go"}]}}}
+JSON
+HOME=/home/u run_event tab.focused
+out=$(log)
+check_absent   "mirror: a remote host tag gets no number or local tag" "$out" "tab rename w1:t1"
+check_absent   "mirror: a fresh mirror tab is not named"               "$out" "tab rename w1:t2"
+check_absent   "mirror: an owned mirror tab is not renamed"            "$out" "tab rename w1:t3"
+check_contains "mirror: a native tab after them keeps its slot"        "$out" "tab rename w1:t4 [4] web${SEP}nvim"
+: >"$HERDR_MOCK_LOG"
+HOME=/home/u run_event --clear
+check_absent   "mirror: --clear leaves a mirror tab's number alone"    "$(log)" "tab rename w1:t3"
+teardown
+
+# ======================================================================
+# Scenario: the per-list path knows its mirror tabs too, and so does a pass
+#   that only numbers (NAME_TABS=0), which has no pane list of its own to read.
+#   t1 is a background split, so no pane resolves for it at all: every pane of
+#   the tab is asked, not just the one naming would pick.
+# ======================================================================
+for nt in 1 0; do
+  setup
+  export AUTO_INDEX=1 NAME_TABS=$nt
+  fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"[1] api"}]}}
+JSON
+  fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[
+  {"tab_id":"w1:t1","label":"[4] Build API","pane_count":2,"focused":false},
+  {"tab_id":"w1:t2","label":"[1] logs","pane_count":1,"focused":true}
+]}}
+JSON
+  fixture panes.json <<'JSON'
+{"result":{"panes":[
+  {"pane_id":"p1","tab_id":"w1:t1","focused":false,"cwd":"/home/u/.local/state/herdr-mirror/.mirror-pane"},
+  {"pane_id":"p2","tab_id":"w1:t1","focused":true,"cwd":"/home/u/.local/state/herdr-mirror/.mirror-pane"},
+  {"pane_id":"p3","tab_id":"w1:t2","focused":true,"cwd":"/home/u/dev/web"}
+]}}
+JSON
+  fixture procinfo_p3.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":300,
+  "foreground_processes":[{"pid":300,"argv0":"-zsh","cmdline":"-zsh"}]}}}
+JSON
+  HOME=/home/u run_event tab.focused
+  out=$(log)
+  check_absent   "mirror, list path, NAME_TABS=$nt: the split mirror tab is untouched" "$out" "tab rename w1:t1"
+  check_contains "mirror, list path, NAME_TABS=$nt: the tab after it is numbered 2"     "$out" "tab rename w1:t2 [2] "
+  teardown
+done
+
+# ======================================================================
+# Scenario: a per-list pass that cannot read the pane list cannot tell which
+#   tabs are herdr-mirror's, so it writes no tab at all rather than number a
+#   mirror tab on a socket blip. Every way the read can go wrong: the call
+#   fails, it answers something that does not parse, or it parses but carries
+#   no pane array (an error envelope, a null).
+# ======================================================================
+for how in fail garbled envelope null; do
+  setup
+  export AUTO_INDEX=1
+  fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"[1] api"}]}}
+JSON
+  fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[
+  {"tab_id":"w1:t1","label":"Build API","pane_count":1,"focused":true},
+  {"tab_id":"w1:t2","label":"logs","pane_count":1,"focused":false}
+]}}
+JSON
+  case $how in
+    fail)     export HERDR_MOCK_FAIL_VERB="pane list" ;;
+    garbled)  printf 'not json\n' | fixture panes.json ;;
+    envelope) printf '{"error":{"message":"socket closed"}}\n' | fixture panes.json ;;
+    null)     printf '{"result":{"panes":null}}\n' | fixture panes.json ;;
+  esac
+  HOME=/home/u run_event tab.focused
+  check_absent "no pane list ($how): no tab is written" "$(log)" "tab rename"
+  unset HERDR_MOCK_FAIL_VERB
+  teardown
+done
+
 t_summary

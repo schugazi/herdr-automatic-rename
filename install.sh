@@ -27,7 +27,10 @@ command -v jq >/dev/null 2>&1 || die "jq is not on PATH; the plugin needs it too
 
 # Where the hook lives. A clone has the engine next to this script; a curl'd run
 # has nothing next to it, so the hook globs herdr's managed plugin directory,
-# whose name carries a version hash that changes under every upgrade.
+# whose name carries a version hash that changes under every upgrade. herdr
+# 0.9.5 moved that directory from github/<id> to
+# github-installations/<id>/<n>-0/checkout, and its update leaves the old clone
+# behind, so the hook tries the new layout first and the old one after it.
 # $0 is a file only when this script was run from disk. Piped from curl it is
 # "bash", whose dirname is the current directory -- which would read as a clone
 # to anyone who happened to be standing in one.
@@ -40,13 +43,14 @@ else
   from_clone=0
   # Written with a literal $HOME so the startup file stays portable across
   # machines. Only a non-default XDG_CONFIG_HOME hard-codes a resolved path.
-  base="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins/github"
+  base="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins"
   # The single quotes keep $HOME literal in what we write; that is the point.
   # shellcheck disable=SC2016
   case "$base" in
-    "$HOME"/*) hook_dir='$HOME'"${base#"$HOME"}/herdr-automatic-rename-*/shell" ;;
-    *) hook_dir="$base/herdr-automatic-rename-*/shell" ;;
+    "$HOME"/*) base='$HOME'"${base#"$HOME"}" ;;
   esac
+  hook_dir="$base/github-installations/herdr-automatic-rename-*/*/checkout/shell"
+  old_hook_dir="$base/github/herdr-automatic-rename-*/shell"
 fi
 
 # --- 1. the plugin ---
@@ -70,7 +74,8 @@ case "$shell" in
     else
       # (N) is zsh's nullglob qualifier: no match expands to nothing rather
       # than erroring on every new shell.
-      snippet="for _f in $hook_dir/hook.zsh(N); do
+      snippet="for _f in $hook_dir/hook.zsh(N) \\
+          $old_hook_dir/hook.zsh(N); do
   source \$_f; break
 done"
     fi
@@ -84,7 +89,8 @@ done"
     if [ "$from_clone" = 1 ]; then
       snippet="[ -r $hook_dir/hook.bash ] && source $hook_dir/hook.bash"
     else
-      snippet="for _f in $hook_dir/hook.bash; do
+      snippet="for _f in $hook_dir/hook.bash \\
+          $old_hook_dir/hook.bash; do
   [ -r \"\$_f\" ] && { source \"\$_f\"; break; }
 done"
     fi
@@ -94,7 +100,8 @@ done"
     if [ "$from_clone" = 1 ]; then
       snippet="test -r $hook_dir/hook.fish; and source $hook_dir/hook.fish"
     else
-      snippet="for _f in $hook_dir/hook.fish
+      snippet="for _f in $hook_dir/hook.fish \\
+          $old_hook_dir/hook.fish
     test -r \"\$_f\"; and source \"\$_f\"; and break
 end"
     fi
@@ -106,6 +113,15 @@ esac
 
 if [ -f "$rc" ] && grep -qF "$MARKER" "$rc"; then
   say "hook: already in $rc"
+  # A line written before herdr 0.9.5 globs only github/, which herdr's update
+  # leaves behind, so it keeps loading an old engine. The startup file is the
+  # user's to edit, so print the new line rather than rewrite theirs.
+  if grep -qF '/herdr/plugins/github/herdr-automatic-rename-*/shell/hook.' "$rc" &&
+    ! grep -qF '/github-installations/herdr-automatic-rename-' "$rc"; then
+    say "hook: that is the older hook line, which misses herdr 0.9.5's plugin folder."
+    say "      Replace the lines under \"$MARKER\" with:"
+    printf '%s\n' "$snippet"
+  fi
 else
   mkdir -p "$(dirname "$rc")"
   printf '\n%s\n%s\n' "$MARKER" "$snippet" >>"$rc"

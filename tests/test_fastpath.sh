@@ -240,4 +240,43 @@ JSON
 check "unresolved pane: no rename" "" "$(log)"
 teardown
 
+# ======================================================================
+# A herdr-mirror pane (issue #26). herdr-mirror types `exec <streamer>` into a
+# local shell sitting in its .mirror-pane marker directory, so the hooks fire
+# there once. The tab belongs to the remote: herdr-mirror pushes any local
+# label to the remote tab as a user rename, which opts that tab out on the
+# remote. Neither hook may rename it.
+# ======================================================================
+setup
+mkdir -p "$SB/herdr-mirror/.mirror-pane"
+(cd "$SB/herdr-mirror/.mirror-pane" &&
+  /usr/bin/env bash "$ENGINE" preexec "exec '/Users/me/.local/bin/herdr-mirror' pane w1:p1")
+check "mirror pane: preexec renames nothing" "" "$(log)"
+: >"$HERDR_MOCK_LOG"
+(cd "$SB/herdr-mirror/.mirror-pane" && /usr/bin/env bash "$ENGINE" precmd)
+check "mirror pane: precmd renames nothing" "" "$(log)"
+teardown
+
+# A local shell in a mirror tab: split beside the mirror pane, or moved into its
+# tab (the pane now reports t2). Its own $PWD is no marker, but the tab's label is
+# still the remote's.
+setup
+printf '{"t2":{"auto":"zsh","enabled":true}}\n' >"$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+fixture pane_p1.json <<'JSON'
+{"result":{"pane":{"pane_id":"p1","tab_id":"t2"}}}
+JSON
+fixture tab_t2.json <<'JSON'
+{"result":{"tab":{"tab_id":"t2","label":"[2]"}}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[{"pane_id":"p1","tab_id":"t2","cwd":"/home/me"},
+  {"pane_id":"p9","tab_id":"t2","cwd":"/home/me/herdr-mirror/.mirror-pane"}]}}
+JSON
+/usr/bin/env bash "$ENGINE" preexec "nvim notes.md"
+check "local shell in a mirror tab: renames nothing" "" "$(log)"
+# No pane list, no way to tell: nothing is written either.
+HERDR_MOCK_FAIL_VERB="pane list" /usr/bin/env bash "$ENGINE" preexec "nvim notes.md"
+check "local shell, unreadable pane list: renames nothing" "" "$(log)"
+teardown
+
 t_summary

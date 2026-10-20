@@ -25,7 +25,13 @@
 # lives. BASH_SOURCE[0] is the sourced file even inside the functions below
 # (bash 3.0+); resolve to an absolute, symlink-safe dir so a later `cd` in the
 # shell can't invalidate the path.
-_har_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)
+#
+# This runs in the user's own shell, where cd and pwd may be aliases or
+# functions (zoxide, rvm, nvm's cdnvm), and CDPATH can send a relative cd into
+# another tree and make it echo the directory. `builtin` skips the first two
+# and the empty CDPATH turns off the search, so only pwd's output lands in
+# _har_root (issue #28).
+_har_root=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && builtin pwd)
 _har_bin="$_har_root/automatic-rename.sh"
 
 # Re-sourcing ~/.bashrc re-runs whatever appended to an array PROMPT_COMMAND

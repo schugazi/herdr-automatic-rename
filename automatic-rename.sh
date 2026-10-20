@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# herdr-automatic-rename - one plugin, two toggleable features:
+# herdr-automatic-rename - one plugin, three toggleable features:
 #
 #   NAME_TABS=1   auto-name each tab after its foreground program, or the shell
 #                 name at a bare prompt (manual renames opt a tab out). Applies
@@ -16,6 +16,8 @@
 #                 only when the panel is grouped-sorted ("priority" sort reorders
 #                 the panel behind an API we can't read, see ar_agent_sort).
 #                 Agent prefixes are stripped in both cases.
+#   NAME_PANES=1  show each named agent's name on its pane border, as a
+#                 display-only title (see ar_name_panes).
 #
 # Naming a kind and switching it off does not merely stop numbering: its pass
 # still runs and strips the prefixes already there, so the change is visible on
@@ -30,10 +32,10 @@
 # the exception, and only because they were already stripped this way whenever
 # NAME_TABS was on.
 #
-# Both default on and are configured in config.sh ($HERDR_AUTOMATIC_RENAME_CONFIG). A
-# single unified reconcile drives both: one pass computes a tab's base name and
-# its "[N]" prefix together and issues one rename per item, so a brand-new tab
-# settles at "[3] zsh" in a single rename with no placeholder flicker.
+# All three default on and are configured in config.sh ($HERDR_AUTOMATIC_RENAME_CONFIG).
+# A single unified reconcile drives them all: one pass computes a tab's base name
+# and its "[N]" prefix together and issues one rename per item, so a brand-new
+# tab settles at "[3] zsh" in a single rename with no placeholder flicker.
 #
 # Invoked several ways, all routing through ar_run:
 #   * herdr [[events]] hooks:     automatic-rename.sh <event.name>
@@ -1223,6 +1225,41 @@ ar_branch_of() {
   printf '%s' "$AR_BRANCH"
 }
 
+# ar_mirror_pane <directory> -> 0 when it is herdr-mirror's .mirror-pane marker.
+# A pane there streams a terminal from another machine, and its tab label is the
+# remote tab's. herdr-mirror reads a local label that differs as a user rename
+# and pushes it to the remote, where this plugin, if it runs there too, opts the
+# tab out for good (issue #26). So a mirror tab's label is never written here,
+# not its name, its number, or the host tag: the remote names it, and
+# herdr-mirror copies that name down.
+ar_mirror_pane() {
+  case $1 in */.mirror-pane) return 0 ;; esac
+  return 1
+}
+
+# ar_mirror_tabs <snapshot or pane list JSON> -> " <tab_id> <tab_id> ", every tab
+# holding a herdr-mirror pane, or " " when none does. One jq per pass, so the
+# tab loop tests a row with a case match. Every pane of the tab is asked, not
+# just the one naming would pick: a background split resolves no pane at all,
+# and its label is still the remote's. The marker test is herdr-mirror's own,
+# either cwd field, the same one ar_mirror_pane makes.
+#
+# Returns 1 when there is nothing to read, it does not parse, or it carries no
+# pane array (an error envelope parses fine), and the caller then writes no tab
+# at all. An empty set there would let the pass number every mirror tab on a
+# socket blip, and the opt-out that sends to the remote is for good.
+ar_mirror_tabs() {
+  local ids
+  [ -n "$1" ] || return 1
+  ids=$(printf '%s' "$1" | jq -r '
+    (.result.snapshot // .snapshot // .result // .).panes
+    | if type != "array" then error("no pane array") else . end
+    | [ .[]
+      | select(any(.foreground_cwd, .cwd; type == "string" and endswith("/.mirror-pane")))
+      | .tab_id ] | unique | join(" ")' 2>/dev/null) || return 1
+  printf ' %s ' "$ids"
+}
+
 # ar_tab_name <tab_id> <pane_count> <focused> <layout_pane> [workspace base]
 #   -> base name on stdout.
 # Returns 1 when the name can't be computed (no resolvable pane, process-info
@@ -1962,6 +1999,13 @@ ar_reconcile_tabs() {
       [ -n "$tid" ] || continue
       i=$(( i + 1 ))
       AR_SEEN_TABS="$AR_SEEN_TABS $tid"
+      # Ahead of everything that writes, --clear included: any label put on a
+      # mirror tab here is pushed to the remote tab (see ar_mirror_pane). Its
+      # position still counts, so the tabs after it keep their numbers.
+      case ${AR_MIRROR_TABS:-} in *" $tid "*)
+        ar_trace "$tid mirror tab: the label is the remote's, left alone"
+        continue ;;
+      esac
       base0=$(ar_tab_strip_prefix "$label" "$(ar_tag_strip_ok "$tid")")
       base=$base0
       named=0
@@ -2305,6 +2349,77 @@ ar_renumber_agents() {
   done
 }
 
+# ar_name_panes [snapshot JSON] [pane list JSON] - show each named agent on its
+# pane border
+# (NAME_PANES). herdr's border shows a reported title, else the pane's own
+# label, else the agent kind, and never the name given by `herdr agent start
+# <name>` or `agent rename`. This reports that name as the pane's title through
+# `pane report-metadata`, which is display-only: the pane's label stays the
+# user's, and the plugin owns no pane name.
+#
+# No record is kept. herdr holds the title per source, so this plugin's title is
+# the only one its clear touches, and the --agent guard ties it to the agent: the
+# title is hidden if another kind takes the pane, and herdr drops it when that
+# agent exits. So only agent panes are asked about. A pane whose title already
+# says what is wanted costs nothing, and a pane that should carry none but shows
+# a title gets this source's title cleared. The compare is against the title
+# herdr shows, whichever source reported it, so another source titling an agent
+# pane costs a no-op clear per pass, or the two overwrite each other at each
+# event. herdr's own integrations report no titles.
+#
+# `agent rename` emits no event, so a renamed agent's border follows at the next
+# one, as a tab name does. herdr-mirror panes are skipped: their title is the
+# remote's (see ar_mirror_pane). The snapshot already in hand is the input when
+# there is one. Without it (herdr below 0.7.2) the pass reads the two lists,
+# reusing a pane list the pass already fetched, and writes nothing if it cannot
+# read both. There, NAME_PANES=0 reads nothing, so a switched-off feature costs
+# no round-trip: its titles go when their agents exit, or with the clear action.
+ar_name_panes() {
+  local json="${1:-}" panes="${2:-}" agents rows pid kind name label title mirror want
+  if [ -z "$json" ]; then
+    [ "$NAME_PANES" = "1" ] || [ "$CLEAR" = "1" ] || return 0
+    [ -n "$panes" ] || panes=$("$HERDR" pane list 2>/dev/null) || return 0
+    agents=$("$HERDR" agent list 2>/dev/null) || return 0
+    json="$panes
+$agents"
+  fi
+  # Slurped, so the snapshot and the two lists read the same: every document
+  # contributes its panes and its agents, wherever its envelope keeps them.
+  rows=$(printf '%s' "$json" | jq -rs "$AR_JQ_CLEAN"'
+    map((.result.snapshot // .snapshot // .result // .) | objects) as $d
+    | ([ $d[].agents // empty | arrays | .[] | select(.pane_id != null)
+         | { key: .pane_id, value: (.name // "") } ] | from_entries) as $names
+    | $d[].panes // empty | arrays | .[]
+    | select(.pane_id != null and (.agent // "") != "")
+    | [ (.pane_id | clean), (.agent | clean), ($names[.pane_id] // "" | clean),
+        (.label | clean), (.title | clean),
+        (any(.foreground_cwd, .cwd; type == "string" and endswith("/.mirror-pane"))
+         | tostring) ]
+    | join([31] | implode)' 2>/dev/null) || return 0
+  while IFS=$AR_ROW_SEP read -r pid kind name label title mirror; do
+    [ -n "$pid" ] && [ "$mirror" = "false" ] || continue
+    want=""
+    if [ "$CLEAR" != "1" ] && [ "$NAME_PANES" = "1" ]; then
+      case "$name" in \[*) name=$(ar_strip_prefix "$name") ;; esac
+      ar_border_title "$name" "$kind" "$label" >/dev/null
+      want=$AR_BORDER_TITLE
+    fi
+    [ "$want" = "$title" ] && continue
+    # Each value goes in its own argument: herdr refuses `--title=<value>` as an
+    # unknown option, and takes the argument after a flag as its value whatever
+    # it starts with.
+    if [ -n "$want" ]; then
+      ar_trace "$pid border title: $want"
+      "$HERDR" pane report-metadata "$pid" --source herdr-automatic-rename \
+        --agent "$kind" --title "$want" >/dev/null 2>&1 || true
+    else
+      ar_trace "$pid border title cleared"
+      "$HERDR" pane report-metadata "$pid" --source herdr-automatic-rename \
+        --clear-title >/dev/null 2>&1 || true
+    fi
+  done <<< "$rows"
+}
+
 # ar_wait_tab_gone <tab_id> - block (bounded ~2s) until a just-closed tab has left
 # herdr's model, so the reconcile that follows never numbers by a stale list.
 # herdr keeps a closing tab in `tab list` until its pane finishes tearing down;
@@ -2456,8 +2571,8 @@ label: $label"
     printf 'trace, the whole pass:\n'
     cat "$AR_TRACE_FILE" 2>/dev/null
   fi
-  printf '\nknobs: NAME_TABS=%s AUTO_INDEX=%s TAB_CONTEXT=%s AGENT_TITLES=%s HIDE_SHELL=%s HOST_PREFIX=%s\n' \
-    "${NAME_TABS:-1}" "${AUTO_INDEX:-1}" "${TAB_CONTEXT:-1}" "${AGENT_TITLES:-1}" "${HIDE_SHELL:-0}" "${HOST_PREFIX:-0}"
+  printf '\nknobs: NAME_TABS=%s NAME_PANES=%s AUTO_INDEX=%s TAB_CONTEXT=%s AGENT_TITLES=%s HIDE_SHELL=%s HOST_PREFIX=%s\n' \
+    "${NAME_TABS:-1}" "${NAME_PANES:-1}" "${AUTO_INDEX:-1}" "${TAB_CONTEXT:-1}" "${AGENT_TITLES:-1}" "${HIDE_SHELL:-0}" "${HOST_PREFIX:-0}"
   if [ -n "$tab" ]; then ar_notify "Doctor: $tab" "$head"
   else ar_notify "Doctor: no tab resolved" "$head"
   fi
@@ -2471,7 +2586,7 @@ label: $label"
 # whether to number or to strip; --clear ignores the toggles and strips
 # everything (the uninstall path).
 ar_reconcile() {
-  local wsjson snap
+  local wsjson snap lpanes="" mjson
   # A reset deletes the target tab's state once (under the lock) so it re-adopts.
   # Whether there was anything to re-adopt is read BEFORE the delete, because that
   # is what the action reports back and `del` on a key that was never there
@@ -2575,7 +2690,14 @@ ar_reconcile() {
     # merely late in reporting. Here that is a round-trip rather than a jq over
     # the snapshot, so it is still asked for only where a pass will read it.
     if ar_ws_derives && { [ "$NAME_TABS" = "1" ] || ar_ws_pass; }; then
-      AR_PANES_JSON=$("$HERDR" pane list 2>/dev/null) || AR_PANES_JSON='{"result":{"panes":[]}}'
+      # The empty stand-in is fine for naming, which then names nothing. The
+      # mirror check below must not mistake it for a list, so only a real one is
+      # kept for it.
+      if AR_PANES_JSON=$("$HERDR" pane list 2>/dev/null); then
+        lpanes=$AR_PANES_JSON
+      else
+        AR_PANES_JSON='{"result":{"panes":[]}}'
+      fi
     fi
   fi
   # ar_index_pass decides which of these have work to do (numbering, or the
@@ -2587,7 +2709,18 @@ ar_reconcile() {
   if ar_index_pass tabs || [ "$NAME_TABS" = "1" ]; then
     AR_SEEN_TABS=""
     AR_TABS_PARTIAL=""
-    ar_reconcile_tabs "$wsjson"
+    # The pane list fetched above when there was one, and a fetch of its own
+    # when not: numbering alone still has to know which tabs it must not touch.
+    if [ "$AR_HAVE_SNAPSHOT" = "1" ]; then
+      mjson=$snap
+    else
+      mjson=${lpanes:-$("$HERDR" pane list 2>/dev/null)}
+    fi
+    if AR_MIRROR_TABS=$(ar_mirror_tabs "$mjson"); then
+      ar_reconcile_tabs "$wsjson"
+    else
+      ar_trace "tabs left alone: no pane list to tell herdr-mirror's tabs by"
+    fi
     # AR_SEEN_TABS is a space-joined list and ar_state_prune takes one tab id per
     # argument, so the split is the call. herdr tab ids carry no whitespace.
     # A pass that could not read every workspace's tabs prunes nothing: the tabs
@@ -2599,6 +2732,15 @@ ar_reconcile() {
   fi
   if ar_index_pass agents; then
     ar_renumber_agents
+  fi
+  # Names come off the snapshot taken before the agent pass, so an older herdr's
+  # agents may have been renumbered since. That changes no title, since the
+  # "[N] " is stripped. It runs with NAME_PANES=0 too, which is what takes the
+  # titles back off.
+  if [ "$AR_HAVE_SNAPSHOT" = "1" ]; then
+    ar_name_panes "$snap"
+  else
+    ar_name_panes "" "$lpanes"
   fi
   # The force was for this pass. ar_run can loop the reconcile when events land
   # while it runs, and a tab still forced on a later loop is a tab whose opt-out
@@ -2658,6 +2800,7 @@ ar_fast_tab() {
   local tab="${AR_FAST_TAB:-}"
   ar_trace "fast tab entered: $MODE, tab [${tab}]"
   [ -n "$tab" ] || { ar_trace "fast tab: no HERDR_TAB_ID"; return 0; }
+  ar_mirror_pane "$PWD" && { ar_trace "$tab mirror pane: named by the remote"; return 0; }
   local prog="" cmd="" info name label raw prefix slabel enabled auto want ws
   local tag hosttag core
   if [ "$MODE" = "preexec" ]; then
@@ -2726,6 +2869,15 @@ ar_fast_tab() {
   fi
   want="${hosttag}${prefix}${name}"
   if [ "$want" != "$label" ]; then
+    # The $PWD check above covers only a shell inside the marker directory. A
+    # local shell split beside a mirror pane, or moved into its tab, would still
+    # write the remote's label (see ar_mirror_pane), so the tab's panes are asked
+    # here, where a rename is about to happen, and an unreadable pane list writes
+    # nothing. That is one more round-trip per renaming command, not per prompt.
+    local mirror
+    mirror=$(ar_mirror_tabs "$("$HERDR" pane list 2>/dev/null)") \
+      || { ar_trace "$tab no pane list to tell a mirror tab by, nothing renamed"; return 0; }
+    case $mirror in *" $tab "*) ar_trace "$tab mirror tab: named by the remote"; return 0 ;; esac
     "$HERDR" tab rename "$tab" "$want" >/dev/null 2>&1 || { ar_trace "$tab rename failed: [$want]"; return 0; }
     ar_trace "$tab rename issued: [$label] -> [$want]"
   else
@@ -2934,6 +3086,7 @@ ar_main() {
   # overrides and their shared default are read straight from the config by
   # ar_index_on and ar_index_explicit.
   : "${NAME_TABS:=1}"
+  : "${NAME_PANES:=1}"
 
   MODE="${1:-event}"
   CLEAR=0

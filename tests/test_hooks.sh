@@ -33,6 +33,35 @@ export HERDR_TAB_ID="sandbox:t0"
 got=$(HERDR_PANE_ID=x HAL_HOOK="$REPO/shell/hook.bash" /usr/bin/env bash -c 'source "$HAL_HOOK"; echo "$_har_bin"')
 check "bash: self-locates engine next to hook" "$REPO/automatic-rename.sh" "$got"
 
+# The hook runs inside the user's shell, so its self-location must survive a
+# redefined cd (issue #28): an alias to a tool not loaded yet, a cd function
+# that prints (rvm, nvm's cdnvm), or CDPATH making cd echo the directory. Any of
+# these used to leave _har_bin empty or with extra lines, so the hook went quiet.
+# shellcheck disable=SC2016
+got=$(HERDR_PANE_ID=x HAL_HOOK="$REPO/shell/hook.bash" /usr/bin/env bash -c \
+  'shopt -s expand_aliases; alias cd=har_no_such_cmd; source "$HAL_HOOK"; echo "$_har_bin"' 2>/dev/null)
+check "bash: self-locates with cd aliased to a missing command" "$REPO/automatic-rename.sh" "$got"
+
+# shellcheck disable=SC2016
+got=$(HERDR_PANE_ID=x HAL_HOOK="$REPO/shell/hook.bash" /usr/bin/env bash -c \
+  'cd() { echo "Using node v20"; builtin cd "$@"; }; pwd() { echo nope; }; source "$HAL_HOOK"; echo "$_har_bin"')
+check "bash: self-locates with cd and pwd redefined as functions" "$REPO/automatic-rename.sh" "$got"
+
+# CDPATH only applies to a relative path, so source the hook by one.
+# shellcheck disable=SC2016
+got=$(cd "$REPO" && HERDR_PANE_ID=x CDPATH=. /usr/bin/env bash -c \
+  'source shell/hook.bash; echo "$_har_bin"')
+check "bash: self-locates with CDPATH set" "$REPO/automatic-rename.sh" "$got"
+
+# CDPATH is searched before the current directory, so an entry holding its own
+# shell/ used to win and point _har_bin into that other tree.
+_cdp=$(mktemp -d "${TMPDIR:-/tmp}/hal-cdpath.XXXXXX"); mkdir -p "$_cdp/shell"
+# shellcheck disable=SC2016
+got=$(cd "$REPO" && HERDR_PANE_ID=x CDPATH="$_cdp" /usr/bin/env bash -c \
+  'source shell/hook.bash; echo "$_har_bin"')
+rm -rf "$_cdp"
+check "bash: self-locates with CDPATH naming another tree" "$REPO/automatic-rename.sh" "$got"
+
 # The quoted program runs in the SPAWNED shell, so its $variables are that
 # shell's to expand, not this one's.
 # shellcheck disable=SC2016
