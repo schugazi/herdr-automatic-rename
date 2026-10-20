@@ -63,6 +63,14 @@ cat >"$FILE" <<'JSON'
 JSON
 check "only the first line of a prompt" "fix the flaky test" "$(topic_of "$ID" "$DIR")"
 
+# Claude Code writes request-shape and blob lines of hundreds of KB before the
+# first prompt (one live transcript opened it at byte 260,834), so the head read
+# has to reach past them.
+blob=$(printf '%0300000d' 0)
+printf '{"type":"api-request-blob","blob":"%s"}\n{"type":"user","message":{"role":"user","content":"name me past the blob"},"origin":{"kind":"human"}}\n' \
+  "$blob" >"$FILE"
+check "a prompt behind a large request blob" "name me past the blob" "$(topic_of "$ID" "$DIR")"
+
 # ---- a session opened with a slash command ----
 # THE case this feature exists for: Claude Code derives its terminal title from
 # what the user typed, so a session opened this way and answered by the agent

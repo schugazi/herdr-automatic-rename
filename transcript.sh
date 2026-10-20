@@ -45,7 +45,10 @@ _AR_SESSION_ID='^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$'
 # the end it needs rather than the file: a long session's transcript runs to
 # megabytes, and this can run once per untitled agent tab per event.
 _AR_TRANSCRIPT_TAIL=262144
-_AR_TRANSCRIPT_HEAD=65536
+# The first prompt is not at the very start: Claude Code writes request-shape and
+# blob lines of hundreds of KB ahead of it. `first` ends the read at the prompt,
+# so the whole bound is read only from a transcript with no typed prompt in it.
+_AR_TRANSCRIPT_HEAD=1048576
 # The latest prompts sit among tool output that runs to megabytes, and are read
 # only when a retitle is asked for, so that read takes a wider window.
 _AR_TRANSCRIPT_RECENT=4194304

@@ -11,6 +11,7 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 ### Fixed
 
 - A Claude tab no longer gets named after `/clear` (or another built-in session command such as `/compact` or `/model`) when the session has no title yet. `/clear` opens the new session's transcript, so every cleared tab was being named "clear" and, with `AI_TITLES=1`, pinned that way.
+- An untitled Claude tab is named after its first prompt again when Claude Code writes hundreds of KB of request data ahead of it. The first 1 MiB of the transcript is now searched instead of 64 KiB, so such tabs no longer read "claude".
 
 ## [0.13.0] - 2026-09-29
 
