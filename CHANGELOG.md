@@ -11,6 +11,7 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 ### Fixed
 
+- `PANE_TOPICS=0` no longer clears the `topic` token on every event. herdr keeps one `topic` per pane whoever set it, so the clear wiped a value another writer owns, such as a Claude statusline hook's session title; topics already set now go as their agents exit, or with the `clear` action.
 - A Claude tab no longer gets named after `/clear` (or another built-in session command such as `/compact` or `/model`) when the session has no title yet. `/clear` opens the new session's transcript, so every cleared tab was being named "clear" and, with `AI_TITLES=1`, pinned that way.
 - An untitled Claude tab is named after its first prompt again when Claude Code writes hundreds of KB of request data ahead of it. The first 1 MiB of the transcript is now searched instead of 64 KiB, so such tabs no longer read "claude".
 - A local shell split beside a herdr-mirror pane, or moved into its tab, no longer renames that tab when a command starts. The shell hook used to check only the shell's own directory, so the label it wrote was pushed to the remote and opted the tab out there.

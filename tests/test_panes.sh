@@ -277,15 +277,24 @@ check_contains "the per-list path sets topics too" "$(log)" \
   "pane report-metadata w1:q1 $SRC --agent codex --token topic=Research upload tags"
 teardown
 
-# Switched off, and with the clear action, the topics come back off. NAME_PANES
-# is off here so only the topic writes are in the log.
+# Switched off, the topics are left alone: herdr keeps one `topic` per pane, so
+# a clear would also wipe what another writer (a Claude hook) set, on every
+# event. The clear action still takes them off. NAME_PANES is off here so only
+# the topic writes are in the log.
 setup
 topics_json | fixture snapshot.json
 export PANE_TOPICS=0 NAME_PANES=0
 run_event pane.focused
-check "off clears every topic, and sets none" \
-"pane report-metadata w1:q2 $SRC --clear-token topic
-pane report-metadata w1:q3 $SRC --clear-token topic" "$(log)"
+check "off leaves every topic alone" "" "$(log)"
+teardown
+
+# Off, a named pane's border title still goes, and its topic is not touched.
+setup
+topics_json | fixture snapshot.json
+export PANE_TOPICS=0
+run_event pane.focused
+check "off still names a pane, without its topic" \
+  "pane report-metadata w1:q4 $SRC --agent claude --title etl" "$(log)"
 teardown
 
 setup

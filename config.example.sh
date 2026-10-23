@@ -24,8 +24,9 @@
 # Give each agent pane its own topic, what that agent says it is working on,
 # as the `topic` token. herdr's sidebar shows it where a row asks for `$topic`
 # (see the README). It follows AGENT_TITLES and TITLE_CONDENSE like a tab name
-# does. Needs herdr 0.7.4 or newer. 0 turns this off and takes the topics back
-# off at the next event.
+# does. Needs herdr 0.7.4 or newer. 0 turns this off and leaves the token to
+# any other writer (herdr keeps one per pane, whoever set it); topics already
+# set go as their agents exit, or with the clear action.
 # PANE_TOPICS=1
 
 # Prefix workspaces and tabs with their 1-9 jump-key number, e.g. "[2] api". 0

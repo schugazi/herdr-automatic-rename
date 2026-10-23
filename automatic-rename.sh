@@ -2407,7 +2407,11 @@ ar_renumber_agents() {
 # the tab is not named after showed the other's work (issue #32). The topic is
 # what the tab name would say for that pane: ar_agent_title, condensed under
 # TITLE_CONDENSE. It is compared against the token herdr shows, as the title is,
-# and both go in one call.
+# and both go in one call. Unlike a title, herdr keeps one `topic` per pane, not
+# one per source: a clear from any source wipes it. So PANE_TOPICS=0 leaves the
+# token alone, as another writer may own it (a Claude statusline hook reporting
+# its session title), and only the clear action takes it off. Ours goes when its
+# agent exits.
 ar_name_panes() {
   local json="${1:-}" panes="${2:-}" agents rows pid kind name label title mirror want
   local ttl ttl_lc dir_lc dir session topic topic_want args topics=0
@@ -2452,7 +2456,9 @@ $agents"
       want=$AR_BORDER_TITLE
     fi
     topic_want=""
-    if [ "$CLEAR" != "1" ] && [ "$topics" = "1" ] && [ "${AGENT_TITLES:-1}" = "1" ]; then
+    if [ "$CLEAR" != "1" ] && [ "$topics" != "1" ]; then
+      topic_want=$topic
+    elif [ "$CLEAR" != "1" ] && [ "${AGENT_TITLES:-1}" = "1" ]; then
       # A session's AI pin (ai.sh) is what its tab is called, whatever the title
       # says, so it is the pane's topic too. A tab-keyed pin, for an agent with
       # no session, names the tab and not any one pane in it, so it is left out.
