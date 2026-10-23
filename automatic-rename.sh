@@ -2453,12 +2453,19 @@ $agents"
     fi
     topic_want=""
     if [ "$CLEAR" != "1" ] && [ "$topics" = "1" ] && [ "${AGENT_TITLES:-1}" = "1" ]; then
-      ar_agent_title "$pid" "$kind" "$ttl" "$ttl_lc" "$dir_lc" "$dir" "$session"
-      topic_want=$AR_AGENT_TITLE
-      # No reserve: no glyph or name prefix shares the token.
-      if [ -n "$topic_want" ] && [ "${TITLE_CONDENSE:-0}" = "1" ]; then
-        ttl=$(ar_condense_title "$topic_want")
-        [ -n "$ttl" ] && topic_want=$ttl
+      # A session's AI pin (ai.sh) is what its tab is called, whatever the title
+      # says, so it is the pane's topic too. A tab-keyed pin, for an agent with
+      # no session, names the tab and not any one pane in it, so it is left out.
+      if ar_ai_session_pinned "$session"; then
+        topic_want=$AR_AI_TITLE
+      else
+        ar_agent_title "$pid" "$kind" "$ttl" "$ttl_lc" "$dir_lc" "$dir" "$session"
+        topic_want=$AR_AGENT_TITLE
+        # No reserve: no glyph or name prefix shares the token.
+        if [ -n "$topic_want" ] && [ "${TITLE_CONDENSE:-0}" = "1" ]; then
+          ttl=$(ar_condense_title "$topic_want")
+          [ -n "$ttl" ] && topic_want=$ttl
+        fi
       fi
       # herdr keeps the first 80 characters of a token and drops the whitespace
       # that leaves at the end. Sending more never matches what it shows, and

@@ -7,6 +7,7 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 ### Added
 
 - `AI_RETITLE_MINUTES` retitles an AI-pinned Claude tab on its own once the pin is that many minutes old and the session has moved on since. It rides the events that already rename tabs, so an idle tab is never asked about. `0`, the default, keeps every pin until the `retitle` action.
+- With `AI_TITLES=1`, an agent pane's `topic` token is its session's pinned label, as its tab name is, so a retitled session's sidebar row follows the retitle instead of its opening prompt.
 
 ### Fixed
 

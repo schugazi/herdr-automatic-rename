@@ -298,4 +298,40 @@ check_contains "the clear action clears topics too" "$out" \
 check_absent "and sets none" "$out" "--token "
 teardown
 
+# With AI_TITLES, a session's pin is what its tab is called, so it is the topic
+# too, ahead of the title and in place of a title that says nothing. Each agent
+# in a tab reads its own session's pin; a tab-keyed pin names no one pane.
+#   q1 titled, its session pinned       -> the pin
+#   q3 says nothing, its session pinned -> the pin, not cleared
+#   q4 titled, its session unpinned     -> the title
+#   q5 no session, the tab pinned       -> the title
+setup
+fixture snapshot.json <<'JSON'
+{"result":{"snapshot":{"workspaces":[],"tabs":[],"panes":[
+  {"pane_id":"w1:q1","tab_id":"w1:t1","agent":"claude","cwd":"/home/u/api",
+   "terminal_title_stripped":"Research upload tags","agent_session":{"value":"s1"}},
+  {"pane_id":"w1:q3","tab_id":"w1:t1","agent":"claude","cwd":"/home/u/api",
+   "terminal_title_stripped":"Claude Code","agent_session":{"value":"s3"},
+   "tokens":{"topic":"old"}},
+  {"pane_id":"w1:q4","tab_id":"w1:t1","agent":"claude","cwd":"/home/u/api",
+   "terminal_title_stripped":"Fix nightly ETL","agent_session":{"value":"s4"}},
+  {"pane_id":"w1:q5","tab_id":"w1:t1","agent":"codex","cwd":"/home/u/api",
+   "terminal_title_stripped":"Tune the cache"}
+],"agents":[]}}}
+JSON
+pins="$XDG_STATE_HOME/herdr-automatic-rename/ai-pins"
+mkdir -p "$pins"
+printf 'upload-tags-retitled' >"$pins/s1"
+printf 'etl-pinned' >"$pins/s3"
+printf 'tab-pin' >"$pins/tab-w1_t1"
+export AI_TITLES=1 NAME_PANES=0
+run_event pane.focused
+check "each agent pane's topic is its own session's pin" \
+"pane report-metadata w1:q1 $SRC --agent claude --token topic=upload-tags-retitled
+pane report-metadata w1:q3 $SRC --agent claude --token topic=etl-pinned
+pane report-metadata w1:q4 $SRC --agent claude --token topic=Fix nightly ETL
+pane report-metadata w1:q5 $SRC --agent codex --token topic=Tune the cache" "$(log)"
+unset AI_TITLES
+teardown
+
 t_summary

@@ -78,6 +78,19 @@ ar_ai_pinned() {
   [ -n "$AR_AI_TITLE" ]
 }
 
+# ar_ai_session_pinned <session> -> sets AR_AI_TITLE to the label pinned for
+# that agent session; rc 1 when it has none. Only reads: the pane topics
+# (ar_name_panes) show the pin ar_tab_name keeps, never ask for or retitle one.
+ar_ai_session_pinned() {
+  local f
+  AR_AI_TITLE=""
+  [ "${AI_TITLES:-0}" = "1" ] && [ -n "$1" ] || return 1
+  f="$AR_AI_PINS/${1//[!A-Za-z0-9._-]/_}"
+  [ -s "$f" ] || return 1
+  AR_AI_TITLE=$(<"$f")
+  [ -n "$AR_AI_TITLE" ]
+}
+
 # ar_ai_unpin_tab <tab_id> - drop a tab-keyed pin: the agent it named is gone,
 # and the next agent in this tab gets a label of its own. Tests before it
 # forks, since this runs for every tab without an agent.
