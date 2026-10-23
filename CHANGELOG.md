@@ -14,6 +14,17 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 - An untitled Claude tab is named after its first prompt again when Claude Code writes hundreds of KB of request data ahead of it. The first 1 MiB of the transcript is now searched instead of 64 KiB, so such tabs no longer read "claude".
 - A local shell split beside a herdr-mirror pane, or moved into its tab, no longer renames that tab when a command starts. The shell hook used to check only the shell's own directory, so the label it wrote was pushed to the remote and opted the tab out there.
 
+## [0.15.0] - 2026-10-22
+
+### Added
+
+- `PANE_TOPICS` gives each agent pane its own topic as the `topic` token, on by default, so herdr's sidebar can show what every agent in a tab works on with `$topic` ([#32](https://github.com/qu8n/herdr-automatic-rename/issues/32), thanks @bazhand).
+
+### Fixed
+
+- A spinner an agent parks at the end of its title, as Codex does, no longer renames the tab on every frame ([#32](https://github.com/qu8n/herdr-automatic-rename/issues/32), thanks @bazhand).
+- `TITLE_CONDENSE` treats a hyphen as a word break, so a kebab-case title is cut between words instead of mid-word ([#32](https://github.com/qu8n/herdr-automatic-rename/issues/32), thanks @bazhand).
+
 ## [0.14.0] - 2026-10-20
 
 ### Added
@@ -265,7 +276,8 @@ First public release.
 - Configuration via `~/.config/herdr-automatic-rename/config.sh` (or `$HERDR_AUTOMATIC_RENAME_CONFIG`), with a documented `config.example.sh`.
 - A self-contained test suite (bash and jq only).
 
-[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.12.0...v0.13.0
