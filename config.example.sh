@@ -183,13 +183,14 @@
 # when it would start like a tab number ("[12]").
 # TITLE_CONDENSE=0
 
-# 1 has a model write each agent title's label instead, within the same budget
+# Claude follows its own session title and never uses AI labels or pins.
+# 1 has a model write other agents' labels instead, within the same budget
 # (MAX_TITLE_LEN, less any icon or name prefix) and without repeating the
 # workspace's name. Calls the Anthropic Messages API with curl in the
 # background, one call per distinct title, cached under the state dir; the
 # condensed (or plain) title shows until the answer lands. A failed call is
 # retried after an hour. A session keeps the first label it gets; the `retitle`
-# action (bind it to a key) asks again from the session's latest prompts and
+# action (bind it to a key) asks again from the available session context and
 # pins that answer instead. The API key is $ANTHROPIC_API_KEY, or else the
 # ANTHROPIC_API_KEY=<key> line of AI_API_KEY_FILE (read, never sourced; a file
 # holding only the bare key works too). Keep it chmod 600.

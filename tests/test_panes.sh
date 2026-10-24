@@ -307,11 +307,10 @@ check_contains "the clear action clears topics too" "$out" \
 check_absent "and sets none" "$out" "--token "
 teardown
 
-# With AI_TITLES, a session's pin is what its tab is called, so it is the topic
-# too, ahead of the title and in place of a title that says nothing. Each agent
-# in a tab reads its own session's pin; a tab-keyed pin names no one pane.
-#   q1 titled, its session pinned       -> the pin
-#   q3 says nothing, its session pinned -> the pin, not cleared
+# Claude follows its title even with old AI pins present. Other agents still
+# use session pins; a tab-keyed pin names no one pane.
+#   q1 titled, its session pinned       -> the title
+#   q3 says nothing, its session pinned -> cleared, not the old pin
 #   q4 titled, its session unpinned     -> the title
 #   q5 no session, the tab pinned       -> the title
 setup
@@ -335,9 +334,9 @@ printf 'etl-pinned' >"$pins/s3"
 printf 'tab-pin' >"$pins/tab-w1_t1"
 export AI_TITLES=1 NAME_PANES=0
 run_event pane.focused
-check "each agent pane's topic is its own session's pin" \
-"pane report-metadata w1:q1 $SRC --agent claude --token topic=upload-tags-retitled
-pane report-metadata w1:q3 $SRC --agent claude --token topic=etl-pinned
+check "Claude topics bypass pins while other agents retain their naming" \
+"pane report-metadata w1:q1 $SRC --agent claude --token topic=Research upload tags
+pane report-metadata w1:q3 $SRC --clear-token topic
 pane report-metadata w1:q4 $SRC --agent claude --token topic=Fix nightly ETL
 pane report-metadata w1:q5 $SRC --agent codex --token topic=Tune the cache" "$(log)"
 unset AI_TITLES

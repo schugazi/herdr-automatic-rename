@@ -114,11 +114,17 @@ A tab name follows one agent, so in a tab with two agents the sidebar shows one 
 
 To customize, create your config file at `~/.config/herdr-automatic-rename/config.sh` (or point `HERDR_AUTOMATIC_RENAME_CONFIG` elsewhere). See [config.example.sh](config.example.sh) for the full configuration details. Every setting has a default, so you only need to set what you'd like to change.
 
+In this fork, Claude tabs use the session title rather than a separately generated AI label. With `PANE_TOPICS=0`, the Claude hook's `$topic` and `$topic2` metadata supply the title, matching Radar; absent metadata falls back to the terminal title and existing transcript lookup. The title uses the existing `TITLE_CONDENSE` and `MAX_TITLE_LEN` rules on every naming event (for example, focus or agent status changes), without AI pins. Manual tab names remain protected. Other agents retain their existing AI naming. If `PANE_TOPICS=1`, this plugin owns the topic token and reads the terminal/transcript instead, avoiding feedback from its own shortened output.
+
+The hook supplies its display form: hyphens become spaces and each metadata token is limited by Herdr to 80 characters. This is not a verbatim copy of the raw session name, particularly with `TITLE_CONDENSE=0`.
+
 ## Actions
 
 - **reset**: When you manually name a tab, the plugin respects that name and doesn't touch it. This action lets the plugin take over renaming that tab.
 
 - **doctor**: This action prints why the plugin named the current tab the way it did for troubleshooting purposes.
+
+- **retitle**: Refresh a Claude tab from its session title; for other automatically named agents, request a fresh AI label. This does not override manual tab names.
 
 To invoke an action, either run it from the CLI:
 

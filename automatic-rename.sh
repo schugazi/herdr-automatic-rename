@@ -156,7 +156,17 @@ def task($b): clean | lead
   | (if ($b | length) > 0 then debrand($b) | lead else . end)
   | sub("([[:space:]]+[^[:alnum:][:space:][:ascii:]]+)*[[:space:]]*$"; "")
   | gsub("[[:space:]]+"; " ");
-def taskof($brands; $agent): task($brands[$agent | lc] // "");'
+def taskof($brands; $agent): task($brands[$agent | lc] // "");
+def panetask($brands; $pane_topics):
+  . as $p
+  # With PANE_TOPICS=0 the Claude hook owns these tokens, as in Radar.
+  # Otherwise they may be our own condensed label: never feed that back.
+  | (if .agent == "claude" and $pane_topics == "0" then
+       [.tokens.topic, .tokens.topic2 | strings | clean | select(test("\\S"))] | join(" ")
+     else "" end) as $session
+  | (if ($session | length) > 0 then $session
+     else ($p.terminal_title_stripped // $p.terminal_title) end)
+  | taskof($brands; $p.agent);'
 
 # Those rows are split on the ASCII unit separator rather than a tab, because
 # bash counts a tab as IFS WHITESPACE: `read` collapses a run of them, so one
@@ -1139,15 +1149,14 @@ ar_pane_facts() {
   AR_PANE_AGENT=""; AR_PANE_TITLE=""; AR_PANE_TITLE_LC=""; AR_PANE_DIR_LC=""; AR_PANE_DIR=""
   AR_PANE_SESSION=""
   out=$(printf '%s' "$AR_PANES_JSON" | jq -r --arg p "$1" \
-    --arg brands "${AR_TITLE_BRANDS:-}" "$AR_JQ_CLEAN$AR_JQ_TASK"'
+    --arg brands "${AR_TITLE_BRANDS:-}" --arg pane_topics "$PANE_TOPICS" "$AR_JQ_CLEAN$AR_JQ_TASK"'
     ($brands | brandmap) as $brand
     | (.result.panes // .panes // []) | map(select(.pane_id == $p)) | .[0] as $pane
     # ascii_downcase folds ASCII only, so a title and a directory that differ just
     # by the case of a non-ASCII letter are not seen as equal. Deliberate: the
     # refusals it feeds are about product names and directory names, and a
     # Unicode-aware compare would have to move back into jq per tab.
-    | ($pane.terminal_title_stripped // $pane.terminal_title
-       | taskof($brand; $pane.agent)) as $t
+    | ($pane | panetask($brand; $pane_topics)) as $t
     | (($pane.foreground_cwd // $pane.cwd) | clean) as $dir
     | [ ($pane.agent | clean), $t, ($t | ascii_downcase),
         (($dir | split("/") | last) // "" | ascii_downcase), $dir,
@@ -1293,7 +1302,7 @@ ar_agent_title() {
 # failure); a successful HIDE_SHELL computation returns 0 with EMPTY output, so
 # the caller must read the status, not the string, to tell the two apart.
 ar_tab_name() {
-  local pane info prog="" cmd="" title="" condensed=""
+  local pane info prog="" cmd="" title="" condensed="" retitle_mark
   pane=$(ar_resolve_pane "$1" "$2" "$3" "${4:-}")
   [ -n "$pane" ] || { ar_trace "$1 no pane resolved to name from"; return 1; }
   # The caller may already hold this pane's facts, lifted onto the tab row -- but
@@ -1323,9 +1332,21 @@ ar_tab_name() {
     title=$AR_AGENT_TITLE
     # A pinned label holds while the title says nothing (blank, or just the
     # agent's name): the pin is what the tab is called for this session.
-    if [ -z "$title" ] && [ "${AI_TITLES:-0}" = "1" ] && ar_ai_pinned "$1"; then
+    if [ -z "$title" ] && [ "$AR_PANE_AGENT" != "claude" ] && [ "${AI_TITLES:-0}" = "1" ] && ar_ai_pinned "$1"; then
       title=$AR_AI_TITLE
       ar_trace "$1 pinned ai title kept: [$title]"
+    fi
+    # ar_tab_name runs in a command substitution, so the action's mark also
+    # carries a failure reason back to the parent without changing ownership.
+    retitle_mark="$AR_AI_MARKS/${1//[!A-Za-z0-9._-]/_}"
+    if [ -f "$retitle_mark" ]; then
+      if [ -z "$title" ]; then
+        printf 'no-title\n' >"$retitle_mark"
+      elif [ "$AR_PANE_AGENT" = "claude" ]; then
+        rm -f "$retitle_mark"
+      elif [ "${AI_TITLES:-0}" != "1" ] || ! ar_ai_ready; then
+        printf 'ai-unavailable\n' >"$retitle_mark"
+      fi
     fi
     if [ -n "$title" ]; then
       ar_trace "$1 title accepted: [$title]"
@@ -1378,7 +1399,7 @@ ar_tab_name() {
         # A model's label wins where there is one (ai.sh): the session's pinned
         # first label, within the same budget, less the same reserve, that
         # condensing gets.
-        if [ "${AI_TITLES:-0}" = "1" ] && ar_ai_label "$1" "$title" "$reserve" "${5:-}"; then
+        if [ "$AR_PANE_AGENT" != "claude" ] && [ "${AI_TITLES:-0}" = "1" ] && ar_ai_label "$1" "$title" "$reserve" "${5:-}"; then
           ar_trace "$1 ai title used: [$AR_AI_TITLE]"
           title=$AR_AI_TITLE
         elif [ "${TITLE_CONDENSE:-0}" = "1" ]; then
@@ -2427,7 +2448,7 @@ $agents"
   # contributes its panes and its agents, wherever its envelope keeps them.
   # The title facts are the ones ar_pane_facts reads for a tab, through the same
   # `task`, so the topic and the tab name start from one string.
-  rows=$(printf '%s' "$json" | jq -rs --arg brands "${AR_TITLE_BRANDS:-}" \
+  rows=$(printf '%s' "$json" | jq -rs --arg brands "${AR_TITLE_BRANDS:-}" --arg pane_topics "$PANE_TOPICS" \
     "$AR_JQ_CLEAN$AR_JQ_TASK"'
     ($brands | brandmap) as $brand
     | map((.result.snapshot // .snapshot // .result // .) | objects) as $d
@@ -2436,7 +2457,7 @@ $agents"
     | $d[].panes // empty | arrays | .[]
     | select(.pane_id != null and (.agent // "") != "")
     | .agent as $kind
-    | (.terminal_title_stripped // .terminal_title | taskof($brand; $kind)) as $t
+    | panetask($brand; $pane_topics) as $t
     | ((.foreground_cwd // .cwd) | clean) as $dir
     | [ (.pane_id | clean), (.agent | clean), ($names[.pane_id] // "" | clean),
         (.label | clean), (.title | clean),
@@ -2462,7 +2483,7 @@ $agents"
       # A session's AI pin (ai.sh) is what its tab is called, whatever the title
       # says, so it is the pane's topic too. A tab-keyed pin, for an agent with
       # no session, names the tab and not any one pane in it, so it is left out.
-      if ar_ai_session_pinned "$session"; then
+      if [ "$kind" != "claude" ] && ar_ai_session_pinned "$session"; then
         topic_want=$AR_AI_TITLE
       else
         ar_agent_title "$pid" "$kind" "$ttl" "$ttl_lc" "$dir_lc" "$dir" "$session"
@@ -2731,7 +2752,7 @@ ar_reconcile() {
     # inference in ar_resolve_pane. Deliberate -- the rule needs no layout, and a
     # split with an agent working in it is the case the rule exists for.
     AR_SNAP_TABS_JSON=$(printf '%s' "$snap" | jq -c \
-      --arg brands "${AR_TITLE_BRANDS:-}" \
+      --arg brands "${AR_TITLE_BRANDS:-}" --arg pane_topics "$PANE_TOPICS" \
       --argjson passive "$(jq -cn '$ARGS.positional' --args ${PASSIVE_PANE_LABELS[@]+"${PASSIVE_PANE_LABELS[@]}"})" \
       "$AR_JQ_CLEAN$AR_JQ_TASK"'
       ($brands | brandmap) as $brand
@@ -2753,8 +2774,7 @@ ar_reconcile() {
                      | .[0].pane_id)
              // $lp ) as $pick
            | ($pan | map(select(.pane_id == $pick)) | .[0]) as $p
-           | ($p.terminal_title_stripped // $p.terminal_title
-              | taskof($brand; $p.agent)) as $ti
+           | ($p | panetask($brand; $pane_topics)) as $ti
            | (($p.foreground_cwd // $p.cwd) | clean) as $dir
            | . + { _name_pane: $pick,
                    _name_agent: ($p.agent | clean),
@@ -3218,15 +3238,11 @@ ar_main() {
       ar_run fast
       ;;
     retitle)
-      # Leave a mark for the reconcile: ar_ai_label consumes it while naming the
-      # tab and queues a model call from the session's latest prompts. A mark
+      # Leave a mark for the reconcile: Claude consumes it while refreshing
+      # from the session title; other agents queue a model call. A mark
       # still there after the pass was never consumed, because that tab is not
       # an agent tab with a title, or is not named automatically.
       tab=$(ar_action_tab)
-      if [ "${AI_TITLES:-0}" != "1" ] || ! ar_ai_ready; then
-        ar_notify "Nothing to retitle" "AI tab titles are off (AI_TITLES=0, or a needed tool is missing)."
-        exit 0
-      fi
       [ -n "$tab" ] || { ar_notify "Nothing to retitle" "No tab to retitle."; exit 0; }
       mark="$AR_AI_MARKS/$(ar_ai_id "$tab")"
       mkdir -p "$AR_AI_MARKS" && : >"$mark" || exit 0
@@ -3234,8 +3250,13 @@ ar_main() {
         rm -f "$mark"
         ar_notify "Retitle is waiting" "Another naming pass held the lock. Try again."
       elif [ -f "$mark" ]; then
+        reason=$(<"$mark")
         rm -f "$mark"
-        ar_notify "Nothing to retitle" "That tab is not an automatically named agent tab."
+        case "$reason" in
+          no-title) ar_notify "Nothing to retitle" "That agent has no session title yet." ;;
+          ai-unavailable) ar_notify "Nothing to retitle" "AI tab titles are off (AI_TITLES=0, or a needed tool is missing)." ;;
+          *) ar_notify "Nothing to retitle" "That tab is not an automatically named agent tab." ;;
+        esac
       fi
       ;;
     reset)

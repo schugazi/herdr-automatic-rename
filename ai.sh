@@ -9,15 +9,13 @@
 # The first label a session gets is PINNED: later title changes leave the tab
 # alone, so a tab keeps the name it was given at the start. The `retitle` action
 # (a keybinding) replaces the pin with a label for what the session is doing
-# now, written from its latest prompts. AI_RETITLE_MINUTES does the same on its
-# own once a pin is that old and its Claude session has moved on since.
+# now. Claude bypasses this module's labels and follows its own session title.
 #
 # Checked on its own by shellcheck, where AR_AI_TITLE has no reader in sight.
 # shellcheck disable=SC2034
 
 : "${AI_TITLES:=0}"            # 1 = ask a model for agent tab labels
 : "${AI_TITLE_MODEL:=claude-haiku-5-5}"  # any Anthropic API model id
-: "${AI_RETITLE_MINUTES:=0}"   # retitle a pin this old on its own; 0 = never
 : "${AI_API_URL:=https://api.anthropic.com/v1/messages}"
 # The API key: $ANTHROPIC_API_KEY when set, else this file's ANTHROPIC_API_KEY=
 # line (read, never sourced), or the whole file when it is a bare key.
@@ -100,23 +98,6 @@ ar_ai_unpin_tab() {
   return 0
 }
 
-# ar_ai_due -> 0 when AR_AI_PIN is AI_RETITLE_MINUTES old and its Claude
-# session's transcript was written since: the session has moved on from what
-# the pin names. No timer drives this; any event that reconciles the tab asks,
-# and an agent finishing a turn is one, so an idle tab is never asked about.
-# Only Claude is checked, since only its prompts are read for a retitle; any
-# other agent's pin stays until the retitle action. A yes touches the pin, so a
-# slow or failing call is asked again only after another AI_RETITLE_MINUTES.
-# Reads AR_PANE_*, like ar_ai_label.
-ar_ai_due() {
-  [ "$AI_RETITLE_MINUTES" -gt 0 ] 2>/dev/null && [ -s "$AR_AI_PIN" ] || return 1
-  [ "${AGENT_TRANSCRIPT:-1}" = "1" ] && [ "${AR_PANE_AGENT:-}" = "${AR_TRANSCRIPT_AGENT:-claude}" ] || return 1
-  [ -n "$(find "$AR_AI_PIN" -mmin +"$AI_RETITLE_MINUTES" 2>/dev/null)" ] || return 1
-  ar_transcript_file "${AR_PANE_SESSION:-}" "${AR_PANE_DIR:-}" || return 1
-  [ "$AR_TRANSCRIPT_FILE" -nt "$AR_AI_PIN" ] || return 1
-  touch "$AR_AI_PIN"
-}
-
 # ar_ai_budget <reserve> -> sets AR_AI_BUDGET to MAX_TITLE_LEN less <reserve>,
 # the literal text that will share the label (icon, name prefix); rc 1 when
 # nothing is left. Measured in codepoints, not with ${#}, which counts bytes
@@ -193,10 +174,10 @@ ar_ai_label() {
   [ "${AI_TITLES:-0}" = "1" ] && ar_ai_ready || return 1
   ar_ai_pin "$tab"
   mark="$AR_AI_MARKS/$(ar_ai_id "$tab")"
-  # The retitle action left a mark for this tab, or the pin is due a refresh.
+  # The retitle action left a mark for this tab.
   # The pin it replaces stays on the tab until the new answer lands, and a
   # failed call leaves it there.
-  if { { [ -f "$mark" ] && rm -f "$mark"; } || ar_ai_due; } && ar_ai_budget "$reserve"; then
+  if [ -f "$mark" ] && rm -f "$mark" && ar_ai_budget "$reserve"; then
     recent=$(ar_transcript_recent "$AR_PANE_AGENT" "$AR_PANE_SESSION" "$AR_PANE_DIR")
     msg="Session title: $title"
     [ -n "$recent" ] && msg="$msg. The user's latest requests, oldest first: $recent. Name what the session is working on NOW; the latest requests matter most."
@@ -300,8 +281,7 @@ ar_ai_worker() {
         # IFS= keeps a separator of one space from being read back as nothing.
         { IFS= read -r model; IFS= read -r sep; IFS= read -r budget; IFS= read -r ws
           IFS= read -r msg; IFS= read -r pin; } <"$q"
-        # Taken off the queue by a rename rather than deleted, keeping its mtime:
-        # when the prompts were read, which a retitle dates its pin by.
+        # Take the request off the queue before asking the model.
         mv -f "$q" "$taken" 2>/dev/null || rm -f "$q"
         [ -n "$model" ] && [ -n "$msg" ] && [ "$budget" -gt 0 ] 2>/dev/null || continue
         if [ -n "$pin" ]; then
@@ -312,9 +292,7 @@ ar_ai_worker() {
           case $pin in */ai-pins/*) ;; *) continue ;; esac
           out=$(ar_ai_ask "$msg" "$budget" "$ws" "$model" "$sep")
           [ -n "$out" ] && [ -e "$pin" ] || continue
-          # Dated when asked, not answered: a turn that lands while the call is
-          # out is newer than the pin, so ar_ai_due still sees it as unseen.
-          ar_ai_put "$pin" "$out" && touch -r "$taken" "$pin" 2>/dev/null
+          ar_ai_put "$pin" "$out"
         else
           # Every event while a call is out re-queues its title, so a request
           # already answered (or failed recently) is not asked again.
