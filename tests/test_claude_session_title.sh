@@ -92,7 +92,8 @@ printf 'codex-pin' >"$XDG_STATE_HOME/herdr-automatic-rename/ai-pins/s1"
 fixtures 1 "Fix auth" "retry" codex
 run
 check "Codex still uses its AI pin" "codex-pin" "$(label)"
-printf '\nAI_TITLES=0\n' >>"$HERDR_AUTOMATIC_RENAME_CONFIG"
+# Set in the host-local file, which overrides config.sh's AI_TITLES=1.
+printf 'AI_TITLES=0\n' >"$SB/config.local.sh"
 export HERDR_TAB_ID=w1:t1
 fixtures codex-pin "Fix auth" "retry" codex
 run retitle

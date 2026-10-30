@@ -14,6 +14,7 @@ AI_TITLES=1
 CURL_STUB="$SB/bin/curl"
 mkdir -p "$SB/bin"; PATH="$SB/bin:$PATH"
 export ANTHROPIC_API_KEY=test-key
+AR_AI_CATALOG="$SB/catalog.json"
 # shellcheck source=ai.sh
 . "$here/../ai.sh"
 
@@ -24,13 +25,15 @@ if ! ar_ai_ready; then
   rm -rf "$SB"; t_summary; exit
 fi
 
-# The curl stub logs every call, its arguments and the headers it was handed as
-# files, and answers in a Messages API response that opens with a thinking
-# block, as Haiku 5.5's does by default. reply <jq filter on the request>
-# answers whatever the filter makes of it.
-reply() { printf '#!/usr/bin/env bash\necho call >>%q\nprintf "%%s\\n" "$@" >%q\n: >%q\nfor a; do [[ $a == @/dev/fd/* ]] && cat "${a#@}" >>%q; done\njq -c %q\n' \
-  "$SB/calls" "$SB/args" "$SB/headers" "$SB/headers" \
-  "{content: [{type: \"thinking\", thinking: \"\", signature: \"s\"}, {type: \"text\", text: ($1)}]}" \
+# The curl stub logs every call, its arguments, the headers it was handed as
+# files and the request body, and answers in one reply that is both a Messages
+# API response opening with a thinking block, as Haiku 5.5's does by default,
+# and the gateway's chat completion, finished as $FINISH says (stop). reply
+# <jq filter on the request> answers whatever the filter makes of it.
+reply() { printf '#!/usr/bin/env bash\necho call >>%q\nprintf "%%s\\n" "$@" >%q\n: >%q\nfor a; do [[ $a == @/dev/fd/* ]] && cat "${a#@}" >>%q; done\ntee %q | jq -c %q\n' \
+  "$SB/calls" "$SB/args" "$SB/headers" "$SB/headers" "$SB/body" \
+  "($1) as \$t | {content: [{type: \"thinking\", thinking: \"\", signature: \"s\"}, {type: \"text\", text: \$t}],
+    choices: [{index: 0, message: {role: \"assistant\", content: \$t}, finish_reason: \"${FINISH:-stop}\"}]}" \
   >"$CURL_STUB"; chmod +x "$CURL_STUB"; }
 stub() { reply "$(jq -rn --arg t "$1" '$t | tojson')"; }
 ask() { ar_ai_ask "Fix auth retry" 16 "" haiku -; }
@@ -54,7 +57,7 @@ printf 'OTHER_KEY=other-secret\nSECOND_KEY=second\n' >"$SB/other"
 : >"$SB/calls"
 check "a file without the entry answers nothing" "" "$(ANTHROPIC_API_KEY='' AI_API_KEY_FILE="$SB/other" ask)"
 check "and sends no other secret" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
-fkey() { printf "$1" >"$SB/f"; ar_ai_file_key "$SB/f"; }
+fkey() { printf "$1" >"$SB/f"; ar_ai_file_key "$SB/f" ANTHROPIC_API_KEY; }
 check "export and indentation are read past" "k1" "$(fkey '  export ANTHROPIC_API_KEY = "k1"\n')"
 check "single quotes come off" "k2" "$(fkey "ANTHROPIC_API_KEY='k2'\n")"
 check "CRLF line endings are read past" "k3" "$(fkey '# note\r\nANTHROPIC_API_KEY=k3\r\n')"
@@ -200,6 +203,140 @@ printf 'old-agent' >"$AR_AI_PINS/tab-w1_t2"
 ar_ai_pinned w1:t2; check "a sessionless agent is pinned by its tab" "old-agent" "$AR_AI_TITLE"
 ar_ai_unpin_tab w1:t2
 ar_ai_pinned w1:t2; check_rc "and the pin goes with the agent" 1 "$?"
+
+# ---- llm-gateway ----
+# Both branches run from one shared config, the token file's presence the only
+# difference, and each request is compared with llm-gateway's fixture of
+# today's call: its upstream body for the direct branch, its gateway_request
+# for the gateway one.
+FX="$here/fixtures/llm-gateway/automatic-rename__tab-label.json"
+printf 'LLM_GATEWAY_TOKEN=lgw_test-token\n' >"$SB/token"
+AR_ROOT="$SB/root"
+# parity <token file> - one title through the queue and the worker, as an
+# event and the worker it spawns would run it.
+parity() {
+  rm -rf "$AR_AI_DIR"; : >"$SB/body"
+  AI_GATEWAY_TOKEN_FILE=$1 MAX_TITLE_LEN=16 ar_ai_title "Fix the login redirect bug" "" demo
+  AI_GATEWAY_TOKEN_FILE=$1 ar_ai_worker
+}
+answer() { find "$AR_AI_DIR" -maxdepth 1 -type f ! -name lock -exec cat {} +; }
+url() { grep -x 'https*://.*' "$SB/args"; }
+# The -H arguments and the header files, one header per line.
+sent_headers() { awk 'p { print; p = 0 } $0 == "-H" { p = 1 }' "$SB/args" | grep -v '^@'; cat "$SB/headers"; }
+names() { cut -d: -f1 | grep -vix content-type | sort | paste -sd, -; }
+# The gateway's catalog snapshot, with a provider this plugin has never heard of.
+snapshot() {
+  jq -n '{schema: 1, revision: "r", efforts: ["none","minimal","low","medium","high","xhigh","max"],
+    providers: {anthropic: {label: "Anthropic"}, newprov: {label: "New"}},
+    models: [{id: "anthropic/claude-haiku-5-5", provider: "anthropic"}, {id: "newprov/fast-1", provider: "newprov"}]}' >"$AR_AI_CATALOG"
+}
+snapshot
+stub "login-redirect"
+
+parity /nonexistent
+check "direct: today's body, unchanged" "$(jq -cS .upstream.body "$FX")" "$(jq -cS . "$SB/body")"
+check "direct: to today's URL" "$(jq -r .upstream.url "$FX")" "$(url)"
+check "direct: the key in x-api-key" "x-api-key: test-key" "$(cat "$SB/headers")"
+check_contains "direct: today's anthropic-version" "$(sent_headers)" "anthropic-version: 2023-06-01"
+check "direct: the label lands" "login-redirect" "$(answer)"
+
+parity "$SB/token"
+check "gateway: the fixture's gateway_request body" "$(jq -cS .gateway_request.body "$FX")" "$(jq -cS . "$SB/body")"
+check "gateway: to its path on loopback" "http://127.0.0.1:8011$(jq -r .gateway_request.path "$FX")" "$(url)"
+check "gateway: the fixture's headers" "$(jq -r '.gateway_request.headers | keys[]' "$FX" | names)" "$(sent_headers | names)"
+check "gateway: the token as a bearer, from the token file" "Authorization: Bearer lgw_test-token" "$(cat "$SB/headers")"
+check "gateway: the fixture's deadline" "X-Gateway-Deadline: $(jq -r '.gateway_request.headers["X-Gateway-Deadline"]' "$FX")" \
+  "$(sent_headers | grep '^X-Gateway-Deadline:')"
+check "gateway: the token stays out of curl's arguments" "no" "$(grep -q lgw_test-token "$SB/args" && echo yes || echo no)"
+check "gateway: the label lands" "login-redirect" "$(answer)"
+rm -f "$AR_AI_CATALOG"; parity "$SB/token"
+check "gateway: the same request with no snapshot to read" "$(jq -cS .gateway_request.body "$FX")" "$(jq -cS . "$SB/body")"
+snapshot
+
+# Asked once each way under the same title: the model is in the cache key.
+rm -rf "$AR_AI_DIR"; AR_ROOT="$SB/none"
+AI_GATEWAY_TOKEN_FILE=/nonexistent MAX_TITLE_LEN=16 ar_ai_title "T" "" demo
+AI_GATEWAY_TOKEN_FILE="$SB/token" MAX_TITLE_LEN=16 ar_ai_title "T" "" demo
+check "each mode queues its own request" "2" "$(find "$AR_AI_DIR/queue" -type f | wc -l | tr -d ' ')"
+gw_req=$(grep -l / "$AR_AI_DIR"/queue/*)
+check "the gateway one records a provider/model id and its effort" "anthropic/claude-haiku-5-5 low" \
+  "$(printf '%s %s' "$(sed -n 1p "$gw_req")" "$(sed -n 7p "$gw_req")")"
+# A direct key is the one it always was, so answers cached before this change are still found.
+old_key=$(printf '%s\037%s\037%s\037%s\037%s' claude-haiku-5-5 - 16 demo T | md5sum); old_key=${old_key%% *}
+check "a direct request keeps its old cache key" "yes" "$([ -e "$AR_AI_DIR/queue/$old_key" ] && echo yes || echo no)"
+check "and records no effort" "" "$(sed -n 7p "$AR_AI_DIR/queue/$old_key")"
+AI_GATEWAY_TOKEN_FILE="$SB/token" AI_GATEWAY_EFFORT=high MAX_TITLE_LEN=16 ar_ai_title "T" "" demo
+check "a gateway effort is in the cache key" "3" "$(find "$AR_AI_DIR/queue" -type f | wc -l | tr -d ' ')"
+# A request is answered the way it was asked, whichever mode the worker is in.
+rm -f "$AR_AI_DIR"/queue/*
+AI_GATEWAY_TOKEN_FILE=/nonexistent MAX_TITLE_LEN=16 ar_ai_title "T" "" demo
+AR_ROOT="$SB/root"; AI_GATEWAY_TOKEN_FILE="$SB/token" ar_ai_worker
+check "a direct request queued before the token file came goes direct" "$(jq -r .upstream.url "$FX")" "$(url)"
+# And at the effort it was asked at, whatever the worker's config says now.
+rm -rf "$AR_AI_DIR"; AR_ROOT="$SB/none"
+AI_GATEWAY_TOKEN_FILE="$SB/token" AI_GATEWAY_EFFORT=high MAX_TITLE_LEN=16 ar_ai_title "T" "" demo
+AR_ROOT="$SB/root"; AI_GATEWAY_TOKEN_FILE="$SB/token" AI_GATEWAY_EFFORT=medium ar_ai_worker
+check "the recorded effort answers, not the current one" "high" "$(jq -r .reasoning_effort "$SB/body")"
+printf 'anthropic/claude-haiku-5-5\n-\n16\ndemo\nTask title: T\n' >"$AR_AI_DIR/queue/no-effort"
+AI_GATEWAY_TOKEN_FILE="$SB/token" ar_ai_worker
+check "a gateway request recorded without an effort asks at low" "low" "$(jq -r .reasoning_effort "$SB/body")"
+AR_ROOT="$SB/none"
+
+gask() { AI_GATEWAY_TOKEN_FILE=${2:-$SB/token} ar_ai_ask "Fix auth retry" 16 "" "${1:-anthropic/claude-haiku-5-5}" - "${3:-}"; }
+check "gateway: an answer that finished is kept" "auth-retry" "$(stub auth-retry; gask)"
+FINISH=length stub "auth-retry"
+check "gateway: one that did not finish is refused" "" "$(gask)"
+stub "auth-retry"
+check "gateway: the Anthropic key is never sent" "no" "$(gask >/dev/null; grep -q test-key "$SB/args" "$SB/headers" && echo yes || echo no)"
+: >"$SB/calls"; : >"$SB/empty"
+check "gateway: an empty token file answers nothing" "" "$(gask "" "$SB/empty")"
+check "gateway: an Anthropic key in its place is no token" "" "$(gask "" "$SB/key")"
+check "and neither makes a call" "0" "$(wc -l <"$SB/calls" | tr -d ' ')"
+printf '#!/bin/sh\nexit 22\n' >"$CURL_STUB"
+check "gateway: a refused call answers nothing" "" "$(gask)"
+
+# A usable body is no answer when the transfer failed or the JSON breaks off
+# after it, on either path.
+broken() { # <exit status> <trailing bytes>
+  printf '#!/usr/bin/env bash\ncat >/dev/null\nprintf "%%s%%s" %q %q\nexit %s\n' \
+    '{"content":[{"type":"text","text":"auth-retry"}],"choices":[{"message":{"content":"auth-retry"},"finish_reason":"stop"}]}' \
+    "$2" "$1" >"$CURL_STUB"
+}
+broken 28 ""
+check "direct: a cut-off transfer answers nothing" "" "$(ask)"
+check "gateway: a cut-off transfer answers nothing" "" "$(gask)"
+broken 0 '{"content'
+check "direct: malformed trailing JSON answers nothing" "" "$(ask)"
+check "gateway: malformed trailing JSON answers nothing" "" "$(gask)"
+broken 0 ""
+check "the same body whole is an answer" "auth-retry auth-retry" "$(ask) $(gask)"
+
+# Options from the gateway's catalog snapshot: a provider added there is
+# usable with no change here, and a pick it no longer offers, or any pick when
+# no snapshot loads, falls back to the explicit default.
+reply '"\(.model) \(.reasoning_effort)"'
+pick() { AI_GATEWAY_MODEL=$1 AI_GATEWAY_EFFORT=$2 ar_ai_model; gask "$AR_AI_MODEL" "" "$AR_AI_EFFORT" >/dev/null; jq -r '"\(.model) \(.reasoning_effort)"' "$SB/body"; }
+AI_GATEWAY_TOKEN_FILE="$SB/token"
+snapshot
+check "a new provider's model is sent as picked" "newprov/fast-1 high" "$(pick newprov/fast-1 high)"
+check "a pick the snapshot lacks falls back to AI_TITLE_MODEL" "anthropic/claude-haiku-5-5 medium" "$(pick gone/model-1 medium)"
+check "an effort it does not know falls back to low" "newprov/fast-1 low" "$(pick newprov/fast-1 turbo)"
+AI_GATEWAY_MODEL=claude-sonnet-5-5 ar_ai_model
+check "a bare pick is an Anthropic one" "anthropic/claude-sonnet-5-5" "$AR_AI_MODEL"
+rm -f "$AR_AI_CATALOG"
+check "without a snapshot, the default model and low" "anthropic/claude-haiku-5-5 low" "$(pick newprov/fast-1 high)"
+printf '{"schema": 2, "models": [{"id": "newprov/fast-1"}], "efforts": ["high"]}' >"$AR_AI_CATALOG"
+check "with one of an unknown schema, the same" "anthropic/claude-haiku-5-5 low" "$(pick newprov/fast-1 high)"
+snapshot; chmod 000 "$AR_AI_CATALOG"
+if [ -r "$AR_AI_CATALOG" ]; then
+  check "an unreadable snapshot (skipped: running as root)" "" ""
+else
+  check "with an unreadable one, the same" "anthropic/claude-haiku-5-5 low" "$(pick newprov/fast-1 high)"
+fi
+chmod 600 "$AR_AI_CATALOG"
+unset AI_GATEWAY_TOKEN_FILE
+AI_GATEWAY_TOKEN_FILE=/nonexistent AI_GATEWAY_MODEL=newprov/fast-1 ar_ai_model
+check "without the token file the gateway pick is not used" "claude-haiku-5-5" "$AR_AI_MODEL"
 
 rm -rf "$SB"
 t_summary

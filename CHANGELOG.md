@@ -7,6 +7,8 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 ### Added
 
 - Claude tabs follow their session title on naming events, without AI pins or a refresh interval; the existing length and condensing rules still apply. Other agents retain AI naming.
+- AI labels go through llm-gateway, with its model fallback, on a host where the gateway has issued the plugin a token (`AI_GATEWAY_TOKEN_FILE`); `AI_GATEWAY_MODEL` and `AI_GATEWAY_EFFORT` pick any model its catalog offers. Other hosts call Anthropic directly as before.
+- A `config.local.sh` beside `config.sh` is sourced after it, for one host's settings in a config shared between machines.
 - With `AI_TITLES=1`, a non-Claude agent pane's `topic` token is its session's pinned label, as its tab name is, so its sidebar row follows a retitle instead of its opening prompt.
 
 ### Fixed

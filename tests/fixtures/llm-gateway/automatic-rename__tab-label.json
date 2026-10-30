@@ -1,0 +1,64 @@
+{
+  "consumer": "automatic-rename",
+  "call": "tab-label",
+  "captured": "run",
+  "source": "herdr-plugins/automatic-rename/ai.sh:235 ar_ai_ask (body :245, curl :246)",
+  "upstream": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages",
+    "headers": {
+      "accept": "*/*",
+      "anthropic-version": "2023-06-01",
+      "content-length": "872",
+      "content-type": "application/json",
+      "host": "api.anthropic.com",
+      "user-agent": "curl/8.5.0",
+      "x-api-key": "<key>"
+    },
+    "body": {
+      "model": "claude-haiku-5-5",
+      "max_tokens": 1024,
+      "output_config": {
+        "effort": "low"
+      },
+      "system": "You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most 16 characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"-\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written. The tab already sits under a workspace named \"demo\", so never spend characters on that name. Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation.",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Task title: Fix the login redirect bug"
+        }
+      ]
+    }
+  },
+  "timeout": "curl --max-time 60 (whole transfer, ai.sh:246); runs in a detached background worker",
+  "accepts": "no stop_reason check at all: any 2xx (curl -f) whose text blocks hold a line that fits the budget; a failed call caches an empty answer for 60 min (ai.sh:137-140)",
+  "gateway_request": {
+    "path": "/v1/chat/completions",
+    "headers": {
+      "Authorization": "Bearer <key>",
+      "X-Gateway-Deadline": "60"
+    },
+    "body": {
+      "model": "anthropic/claude-haiku-5-5",
+      "reasoning_effort": "low",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most 16 characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"-\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written. The tab already sits under a workspace named \"demo\", so never spend characters on that name. Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation."
+        },
+        {
+          "role": "user",
+          "content": "Task title: Fix the login redirect bug"
+        }
+      ],
+      "gateway": {
+        "output": {
+          "max_tokens": 1024,
+          "mode": "total"
+        },
+        "thinking": "omit"
+      }
+    }
+  },
+  "notes": "Shared config.sh leaves AI_TITLE_MODEL at ai.sh's default claude-haiku-5-5. No thinking block today (gateway thinking omit), output_config.effort low, max_tokens 1024, no temperature. curl sends its own User-Agent (curl/<version>) and Accept */*. The system prompt embeds the budget, the separator and the workspace name, so it varies per call. Migrated adapter must accept only finish_reason stop (today it ignores stop_reason). No X-Gateway-Session: the plan gives rename none (the gateway's stable per-client default applies). Contract gaps: none (thinking omit with effort low is expressible); curl's user-agent becomes the catalog's."
+}

@@ -64,7 +64,7 @@ Local files only.
 
 | Store | Path | Contents |
 | --- | --- | --- |
-| Config | `~/.config/herdr-automatic-rename/config.sh` | bash variables (see `config.example.sh`) |
+| Config | `~/.config/herdr-automatic-rename/config.sh`, then `config.local.sh` beside it | bash variables (see `config.example.sh`); the local file holds one host's overrides |
 | State | `~/.local/state/herdr-automatic-rename/`, under `sessions/<name>/` for a named session | `state.json`, the lock, the rerun flag, `trace.log` |
 | herdr files (read only) | herdr's state dir | `session.json` and the client file, for workspace directories and sidebar collapse |
 
@@ -76,6 +76,7 @@ Local files only.
 - **jq:** parses every JSON reply and cleans every string herdr returns.
 - **git:** read from `.git` files. The git binary is never run.
 - **Claude Code:** transcripts in `~/.claude/projects`, read only when needed. `AGENT_TRANSCRIPT=0` turns this off.
+- **Model labels (`AI_TITLES=1`):** llm-gateway's `/v1/chat/completions` on `127.0.0.1:8011` where its token file for this plugin exists (a `provider/model` id and effort, checked against the gateway's catalog snapshot, with `AI_TITLE_MODEL` and low as the default when the pick isn't offered or the snapshot can't be read), else the Anthropic Messages API. A queued request's model id says which, and a gateway request records its effort, so one queued before a switch is answered the way it was asked.
 
 ## 6. Deployment and infrastructure
 
@@ -88,7 +89,7 @@ There is no server. The plugin runs as short-lived bash processes.
 
 ## 7. Security considerations
 
-- No network and no credentials. The plugin only talks to the local herdr socket, except that `AI_TITLES=1` sends agent task titles to the Anthropic Messages API with curl, using the key in `$ANTHROPIC_API_KEY` or `AI_API_KEY_FILE`.
+- No network and no credentials. The plugin only talks to the local herdr socket, except that `AI_TITLES=1` sends agent task titles with curl: to llm-gateway on loopback with its client token when `AI_GATEWAY_TOKEN_FILE` exists, else to the Anthropic Messages API with the key in `$ANTHROPIC_API_KEY` or `AI_API_KEY_FILE`.
 - The transcript reader sees what the user typed to their agent. It reads only that pane's session and can be turned off.
 - Session ids must look like UUIDs before they become part of a path.
 - Control characters are removed from herdr strings before they reach the shell.

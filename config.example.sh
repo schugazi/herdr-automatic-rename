@@ -3,7 +3,9 @@
 # Copy this file to ~/.config/herdr-automatic-rename/config.sh (or point
 # $HERDR_AUTOMATIC_RENAME_CONFIG at another path) and uncomment what you want to
 # change. The plugin sources it before its defaults, so anything set here wins.
-# Every setting has a working default, so an empty config is fine.
+# Every setting has a working default, so an empty config is fine. A
+# config.local.sh beside it, when there is one, is sourced right after it: the
+# place for one host's settings when config.sh is shared between machines.
 #
 # Array settings replace their default when assigned. Assign () to empty one.
 
@@ -198,6 +200,20 @@
 # AI_TITLE_MODEL=claude-haiku-5-5
 # AI_API_KEY_FILE=~/.config/anthropic/secrets.env
 # AI_API_URL=https://api.anthropic.com/v1/messages
+
+# On a host running llm-gateway (a loopback LLM hub on 127.0.0.1:8011) that has
+# issued this plugin a client token, labels are asked through the gateway
+# instead, which falls back to another model when this one's provider fails. On
+# by the token file's presence (LLM_GATEWAY_TOKEN=<token>, read, never sourced);
+# a host without it calls Anthropic directly as above. The model is
+# AI_GATEWAY_MODEL, any `provider/model` id the gateway's catalog offers, else
+# AI_TITLE_MODEL on Anthropic; a pick the catalog snapshot no longer offers
+# falls back to that, an unknown effort to low, and both do whenever the
+# snapshot can't be read. Set these in config.local.sh, which only this host
+# reads. AI_GATEWAY_TOKEN_FILE=/nonexistent turns the gateway off here.
+# AI_GATEWAY_TOKEN_FILE=~/.config/llm-gateway/clients/rename.env
+# AI_GATEWAY_MODEL=anthropic/claude-haiku-5-5
+# AI_GATEWAY_EFFORT=low
 
 # Verbs dropped when a title starts with one. Only the first word is checked, so
 # "the auth rewrite needs review" keeps "review". The match is by spelling, so

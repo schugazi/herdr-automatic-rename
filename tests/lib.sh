@@ -25,6 +25,11 @@ for _t_tmp in "${TMPDIR:-/tmp}" /tmp /var/tmp; do
   if _t_no_git_above "$_t_tmp"; then export TMPDIR=$_t_tmp; break; fi
 done
 
+# A host running llm-gateway has a token file for this plugin, which turns AI
+# labels toward it: no test may reach a real gateway, even from a detached
+# worker. test_ai.sh points this at a fake one.
+export AI_GATEWAY_TOKEN_FILE=/nonexistent
+
 # check <name> <expected> <actual> -- string equality.
 check() {
   _t_n=$(( _t_n + 1 ))

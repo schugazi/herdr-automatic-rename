@@ -2642,6 +2642,7 @@ ar_doctor() {
   if ar_herdr_version >/dev/null; then ver=$AR_HERDR_VERSION_MEMO; else ver="unreadable"; fi
   jqver=$(jq --version 2>/dev/null) || jqver="not found"
   if [ -f "$CONFIG_FILE" ]; then cfg="$CONFIG_FILE"; else cfg="$CONFIG_FILE (absent, defaults apply)"; fi
+  [ -f "${CONFIG_FILE%.sh}.local.sh" ] && cfg="$cfg, then ${CONFIG_FILE%.sh}.local.sh"
   # The pass has released its lock by now, so a lock still standing is another
   # process's, live or abandoned, and its age is what tells those apart (see
   # ar_lock, which steals past 30s).
@@ -3174,6 +3175,9 @@ ar_main() {
   # to read here.
   # shellcheck source=/dev/null
   [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+  # Then this host's own overrides, for a config.sh shared between machines.
+  # shellcheck source=/dev/null
+  [ -f "${CONFIG_FILE%.sh}.local.sh" ] && . "${CONFIG_FILE%.sh}.local.sh"
   # shellcheck source=naming.sh
   . "$AR_ROOT/naming.sh"
   # The one module that reads the filesystem. Sourced beside naming.sh rather

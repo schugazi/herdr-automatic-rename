@@ -20,6 +20,11 @@
 # The API key: $ANTHROPIC_API_KEY when set, else this file's ANTHROPIC_API_KEY=
 # line (read, never sourced), or the whole file when it is a bare key.
 : "${AI_API_KEY_FILE:=${XDG_CONFIG_HOME:-$HOME/.config}/anthropic/secrets.env}"
+# Where llm-gateway runs and has issued this plugin a token, labels go through
+# it instead (ar_ai_model). These paths are the gateway's own, under $HOME.
+: "${AI_GATEWAY_TOKEN_FILE:=$HOME/.config/llm-gateway/clients/rename.env}"
+: "${AR_AI_CATALOG:=$HOME/.local/state/llm-gateway/catalog.json}"
+AR_AI_GATEWAY_URL=http://127.0.0.1:8011/v1/chat/completions
 
 # Answers to a title are shared by every herdr session; the queue and worker
 # with them. Pins and retitle marks are not: every session numbers its tabs from
@@ -41,6 +46,30 @@ ar_ai_ready() {
     done
   fi
   [ "$_ar_ai_ready" = 1 ]
+}
+
+# ar_ai_model - sets AR_AI_MODEL and AR_AI_EFFORT to what a label is asked
+# under now. With the gateway's token file present the model is a
+# `provider/model` id, AI_GATEWAY_MODEL or else ar_ai_default_model, and the
+# effort AI_GATEWAY_EFFORT (low). Without it, AI_TITLE_MODEL is asked of the
+# Anthropic API directly, at its fixed effort, and AR_AI_EFFORT is empty, so
+# direct requests and cache keys stay what they always were. The id's shape is
+# what routes a request (ar_ai_ask), so one queued under either mode is
+# answered the way it was asked.
+ar_ai_model() {
+  if [ -f "$AI_GATEWAY_TOKEN_FILE" ]; then
+    AR_AI_MODEL=${AI_GATEWAY_MODEL:-$AI_TITLE_MODEL}
+    case $AR_AI_MODEL in */*) ;; *) AR_AI_MODEL=anthropic/$AR_AI_MODEL ;; esac
+    AR_AI_EFFORT=${AI_GATEWAY_EFFORT:-low}
+  else
+    AR_AI_MODEL=$AI_TITLE_MODEL AR_AI_EFFORT=""
+  fi
+}
+
+# ar_ai_default_model -> the gateway model used when a pick can't be checked:
+# AI_TITLE_MODEL, a bare id naming an Anthropic model.
+ar_ai_default_model() {
+  case $AI_TITLE_MODEL in */*) printf '%s' "$AI_TITLE_MODEL" ;; *) printf 'anthropic/%s' "$AI_TITLE_MODEL" ;; esac
 }
 
 # ar_ai_id <string> -> the string with anything unsafe in a file name replaced.
@@ -118,13 +147,15 @@ ar_ai_budget() {
 #
 # Written beside the queue under a dot name the worker's glob skips, then
 # renamed in, so the worker never reads a request half-written. The request
-# carries the model and separator it was made under, so a worker started under
-# an older config answers it the way the request says.
+# carries the model, separator and (gateway only) effort it was made under, so
+# a worker started under an older config answers it the way the request says.
+# The effort is the last line, so a record without one reads as before.
 ar_ai_enqueue() {
   local q="$AR_AI_DIR/queue/.$1.$$"
   mkdir -p "$AR_AI_DIR/queue" 2>/dev/null || return 1
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$AI_TITLE_MODEL" "${TITLE_WORD_SEPARATOR:--}" \
-    "$2" "$3" "$4" "${5:-}" >"$q" && mv -f "$q" "$AR_AI_DIR/queue/$1" || { rm -f "$q"; return 1; }
+  ar_ai_model
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$AR_AI_MODEL" "${TITLE_WORD_SEPARATOR:--}" \
+    "$2" "$3" "$4" "${5:-}" "$AR_AI_EFFORT" >"$q" && mv -f "$q" "$AR_AI_DIR/queue/$1" || { rm -f "$q"; return 1; }
   # Detached and with every stream closed: this runs inside the command
   # substitution that captures the tab's name, which would otherwise wait out
   # the model call.
@@ -143,14 +174,18 @@ ar_ai_cached() {
 # model's label for that title; rc 1 when there is none yet (the title is then
 # queued) or the model's answer was refused.
 #
-# Everything that changes the answer is in the key: model, separator, budget,
-# and the workspace, a word the model is told not to spend on.
+# Everything that changes the answer is in the key: model, gateway effort,
+# separator, budget, and the workspace, a word the model is told not to spend
+# on. A direct request has no effort field, so its key is the one it always was.
 ar_ai_title() {
-  local title=$1 ws=$3 key f
+  local title=$1 ws=$3 key f id
   AR_AI_TITLE=""
   [ "${AI_TITLES:-0}" = "1" ] && [ -n "$title" ] && ar_ai_ready || return 1
   ar_ai_budget "$2" || return 1
-  key=$(printf '%s\037%s\037%s\037%s\037%s' "$AI_TITLE_MODEL" "${TITLE_WORD_SEPARATOR:--}" \
+  ar_ai_model
+  id=$AR_AI_MODEL
+  [ -n "$AR_AI_EFFORT" ] && id="$id"$'\037'"$AR_AI_EFFORT"
+  key=$(printf '%s\037%s\037%s\037%s\037%s' "$id" "${TITLE_WORD_SEPARATOR:--}" \
     "$AR_AI_BUDGET" "$ws" "$title" | md5sum)
   key=${key%% *}
   [ -n "$key" ] || return 1
@@ -202,14 +237,14 @@ ar_ai_label() {
   return 0
 }
 
-# ar_ai_file_key <file> -> the file's ANTHROPIC_API_KEY entry, read the way
+# ar_ai_file_key <file> <name> -> the file's <name> entry, read the way
 # personal-feed reads the same file (optional `export`, surrounding whitespace
 # and quotes; comment lines skipped; never sourced), or the file's one line when
 # that is a bare key. Nothing otherwise, so another secret in a shared file is
 # never sent as this one.
 ar_ai_file_key() {
   local l k v bare="" n=0
-  [ -s "$1" ] || return 0
+  [ -s "$1" ] && [ -n "$2" ] || return 0
   while IFS= read -r l || [ -n "$l" ]; do
     l=${l#"${l%%[![:space:]]*}"}; l=${l%"${l##*[![:space:]]}"}
     [ -n "$l" ] || continue
@@ -217,7 +252,7 @@ ar_ai_file_key() {
     [[ $l == \#* || $l != *=* ]] && continue
     [[ $l == "export "* ]] && { l=${l#export }; l=${l#"${l%%[![:space:]]*}"}; }
     k=${l%%=*} v=${l#*=}
-    [ "${k%"${k##*[![:space:]]}"}" = ANTHROPIC_API_KEY ] || continue
+    [ "${k%"${k##*[![:space:]]}"}" = "$2" ] || continue
     v=${v#"${v%%[![:space:]]*}"}
     [[ ${#v} -ge 2 && ${v:0:1} == "${v: -1}" && ${v:0:1} == [\"\'] ]] && v=${v:1:${#v}-2}
     printf '%s' "$v"
@@ -227,25 +262,75 @@ ar_ai_file_key() {
   return 0
 }
 
-# ar_ai_ask <message> <budget> <workspace label> <model> <separator> -> the
-# model's label, or "" when the call failed or no answer keeps a label's rules.
+# A key or token never holds whitespace: one that does is a mangled entry (an
+# inline comment, a stray word), and is not sent. Either goes in through a
+# header file, so it never shows in `ps`.
+#
+# Both calls are rc 1 on any failure, and then answer nothing: a transfer cut
+# short after a whole JSON body, or a reply parsed up to malformed trailing
+# bytes, must not yield a label. So the body is captured first, the status of
+# its pipeline being curl's, and parsed on its own.
+
+# ar_ai_anthropic <model> <system> <message> -> the answer's text, from the
+# Anthropic Messages API; rc 1 when there is no key or the call failed.
+ar_ai_anthropic() {
+  local key=${ANTHROPIC_API_KEY:-} body
+  [ -n "$key" ] || key=$(ar_ai_file_key "$AI_API_KEY_FILE" ANTHROPIC_API_KEY)
+  [[ -n $key && $key != *[[:space:]]* ]] || return 1
+  body=$(jq -n --arg m "$1" --arg s "$2" --arg u "$3" \
+    '{model: $m, max_tokens: 1024, output_config: {effort: "low"}, system: $s, messages: [{role: "user", content: $u}]}' |
+    curl -sf --max-time 60 "$AI_API_URL" -H @<(printf 'x-api-key: %s\n' "$key") \
+      -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' --data-binary @- 2>/dev/null) || return 1
+  jq -r '.content[]? | select(.type == "text") | .text' 2>/dev/null <<<"$body"
+}
+
+# ar_ai_gateway <provider/model> <effort> <system> <message> -> the answer's
+# text, from llm-gateway's chat route; rc 1 when there is no token or the call
+# failed, and nothing when the answer did not finish (finish_reason not stop).
+#
+# The same request as the direct one: effort low, a 1024-token ceiling as is, no
+# thinking field. The gateway owns timeouts and falls back to another model
+# within the 60 s deadline, so this asks once; a failure of any kind, the
+# gateway's "needs setup" included, is cached like a direct one and asked again
+# after an hour (ar_ai_cached), which is past any Retry-After it sends.
+#
+# The pick is checked against the gateway's catalog snapshot: a model it does
+# not offer becomes ar_ai_default_model, an effort it does not know becomes
+# low, and with no snapshot that loads (missing, unreadable, another schema)
+# both become those defaults, so a stale config.local.sh never fails every call.
+ar_ai_gateway() {
+  local model=$1 effort=${2:-low} key listed body
+  key=$(ar_ai_file_key "$AI_GATEWAY_TOKEN_FILE" LLM_GATEWAY_TOKEN)
+  [[ -n $key && $key != *[[:space:]]* ]] || return 1
+  listed=$(jq -r --arg m "$model" --arg e "$effort" \
+    'select(.schema == 1) | "\(any(.models[]?; .id == $m)) \(any(.efforts[]?; . == $e))"' \
+    "$AR_AI_CATALOG" 2>/dev/null)
+  case $listed in "true "*) ;; *) model=$(ar_ai_default_model) ;; esac
+  case $listed in *" true") ;; *) effort=low ;; esac
+  # --noproxy: the token is for the loopback gateway, never a proxy.
+  body=$(jq -n --arg m "$model" --arg e "$effort" --arg s "$3" --arg u "$4" \
+    '{model: $m, reasoning_effort: $e, messages: [{role: "system", content: $s}, {role: "user", content: $u}],
+      gateway: {output: {max_tokens: 1024, mode: "total"}, thinking: "omit"}}' |
+    curl -sf --noproxy '*' --max-time 61 "$AR_AI_GATEWAY_URL" -H @<(printf 'Authorization: Bearer %s\n' "$key") \
+      -H 'Content-Type: application/json' -H 'X-Gateway-Deadline: 60' --data-binary @- 2>/dev/null) || return 1
+  jq -r '.choices[0]? | select(.finish_reason == "stop") | .message.content // empty' 2>/dev/null <<<"$body"
+}
+
+# ar_ai_ask <message> <budget> <workspace label> <model> <separator> [<effort>]
+# -> the model's label, or "" when the call failed or no answer keeps a label's
+# rules. A `provider/model` id is asked through the gateway at <effort> (low),
+# a bare one of Anthropic.
 #
 # A model counts characters badly, so it is asked for several candidates, each
 # shorter than the last, and the first one that fits is taken.
 ar_ai_ask() {
-  local msg=$1 max=$2 ws=$3 model=$4 sep=$5 out line avoid="" key=${ANTHROPIC_API_KEY:-}
-  [ -n "$key" ] || key=$(ar_ai_file_key "$AI_API_KEY_FILE")
-  # A key never holds whitespace: one that does is a mangled entry (an inline
-  # comment, a stray word), and is not sent.
-  [[ -n $key && $key != *[[:space:]]* ]] || return 0
+  local msg=$1 max=$2 ws=$3 model=$4 sep=$5 sys out line avoid=""
   [ -n "$ws" ] && avoid=" The tab already sits under a workspace named \"$ws\", so never spend characters on that name."
-  # The key goes in through a header file, so it never shows in `ps`.
-  out=$(jq -n --arg m "$model" --arg u "$msg" \
-    --arg s "You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most $max characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"$sep\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written.$avoid Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation." \
-    '{model: $m, max_tokens: 1024, output_config: {effort: "low"}, system: $s, messages: [{role: "user", content: $u}]}' |
-    curl -sf --max-time 60 "$AI_API_URL" -H @<(printf 'x-api-key: %s\n' "$key") \
-      -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' --data-binary @- 2>/dev/null |
-    jq -r '.content[]? | select(.type == "text") | .text' 2>/dev/null) || return 0
+  sys="You name terminal tabs. Given what a coding agent's session is about, write a tab label of at most $max characters that says which task this is, so it stands apart from the user's other agent tabs. Lowercase words joined by \"$sep\"; keep the most specific nouns, drop generic verbs and filler, abbreviate long words when that keeps meaning (config->cfg, database->db). Keep issue keys and acronyms as written.$avoid Reply with 5 candidate labels, one per line, best first, each shorter than the one before. Labels only: no numbering, quotes or explanation."
+  case $model in
+  */*) out=$(ar_ai_gateway "$model" "${6:-low}" "$sys" "$msg") || return 0 ;;
+  *) out=$(ar_ai_anthropic "$model" "$sys" "$msg") || return 0 ;;
+  esac
   while IFS= read -r line; do
     line=$(printf '%s' "$line" | tr -d '`"'"'" | tr -s '[:space:]' ' ')
     line=${line# }; line=${line% }
@@ -269,7 +354,7 @@ ar_ai_ask() {
 # this worker held the lock spawned a worker that found it held and left, but
 # its file was written before that, so this check sees it and goes round again.
 ar_ai_worker() {
-  local q model sep budget ws msg pin out did=0 taken="$AR_AI_DIR/queue/.taken.$$"
+  local q model sep budget ws msg pin effort out did=0 taken="$AR_AI_DIR/queue/.taken.$$"
   mkdir -p "$AR_AI_DIR/queue" 2>/dev/null || return 0
   exec 9>"$AR_AI_DIR/lock"
   while flock -n 9; do
@@ -277,10 +362,10 @@ ar_ai_worker() {
       set -- "$AR_AI_DIR"/queue/*
       [ -e "$1" ] || break
       for q; do
-        model="" sep="" budget="" ws="" msg="" pin=""
+        model="" sep="" budget="" ws="" msg="" pin="" effort=""
         # IFS= keeps a separator of one space from being read back as nothing.
         { IFS= read -r model; IFS= read -r sep; IFS= read -r budget; IFS= read -r ws
-          IFS= read -r msg; IFS= read -r pin; } <"$q"
+          IFS= read -r msg; IFS= read -r pin; IFS= read -r effort; } <"$q"
         # Take the request off the queue before asking the model.
         mv -f "$q" "$taken" 2>/dev/null || rm -f "$q"
         [ -n "$model" ] && [ -n "$msg" ] && [ "$budget" -gt 0 ] 2>/dev/null || continue
@@ -290,14 +375,14 @@ ar_ai_worker() {
           # to an agent that has left the tab (ar_ai_unpin_tab). A retitle asked
           # before the session's first pin landed is dropped the same way.
           case $pin in */ai-pins/*) ;; *) continue ;; esac
-          out=$(ar_ai_ask "$msg" "$budget" "$ws" "$model" "$sep")
+          out=$(ar_ai_ask "$msg" "$budget" "$ws" "$model" "$sep" "$effort")
           [ -n "$out" ] && [ -e "$pin" ] || continue
           ar_ai_put "$pin" "$out"
         else
           # Every event while a call is out re-queues its title, so a request
           # already answered (or failed recently) is not asked again.
           ar_ai_cached "$AR_AI_DIR/${q##*/}" && continue
-          ar_ai_put "$AR_AI_DIR/${q##*/}" "$(ar_ai_ask "$msg" "$budget" "$ws" "$model" "$sep")"
+          ar_ai_put "$AR_AI_DIR/${q##*/}" "$(ar_ai_ask "$msg" "$budget" "$ws" "$model" "$sep" "$effort")"
         fi
         did=1
       done
