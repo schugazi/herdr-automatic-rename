@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- automatic-rename: a tab being renamed with a pencil, in the host's teal and gold. -->
+  <rect width="64" height="64" rx="12" fill="#3f8a96"/>
+  <path d="M6 50V22A6 6 0 0 1 12 16H34A6 6 0 0 1 40 22V50Z" fill="#fdcd03"/>
+  <g stroke="#3f8a96" stroke-width="3.5" stroke-linecap="round">
+    <path d="M13 28H31M13 36H25"/>
+  </g>
+  <g transform="rotate(45 44 36)">
+    <rect x="38" y="10" width="12" height="34" rx="2" fill="#fdcd03" stroke="#3f8a96" stroke-width="3"/>
+    <path d="M38 44H50L44 55Z" fill="#fdcd03" stroke="#3f8a96" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+</svg>
